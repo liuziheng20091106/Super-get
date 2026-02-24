@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
     QStatusBar, QMenuBar, QMenu, QFileDialog, QFrame, QSplitter,
     QScrollArea, QCheckBox, QComboBox, QSpinBox
 )
-from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, pyqtSignal, QThread, QTimer, QUrl
+from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, pyqtSignal, QThread, QTimer, QUrl, QItemSelectionModel
 from PyQt6.QtGui import QAction, QFont, QPalette, QIcon, QPixmap
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 
@@ -91,6 +91,10 @@ class ParseThread(QThread):
                     break
                 self.progress.emit(i + 1, total, url)
                 audio_info = scraper.extract_audio_info(url)
+                
+                if i < total - 1:
+                    time.sleep(Config().REQUEST_INTERVAL)
+                
                 if audio_info:
                     audio_info['list_id'] = list_id
                     results.append(audio_info)
@@ -202,6 +206,9 @@ class ParseAlbumThread(QThread):
                 self.progress.emit(20 + int(70 * (i + 1) / total), 100, f"解析第 {i+1}/{total} 集")
                 
                 audio_info = scraper.extract_audio_info(url)
+                
+                if i < total - 1:
+                    time.sleep(Config().REQUEST_INTERVAL)
                 
                 if audio_info:
                     books.append({
@@ -739,6 +746,14 @@ class MainWindow(QMainWindow):
         self.btn_parse_all.clicked.connect(self.parse_all_unparsed)
         layout.addWidget(self.btn_parse_all)
 
+        self.btn_select_all_unparsed = QPushButton("☑️ 选中未解析")
+        self.btn_select_all_unparsed.clicked.connect(self.select_all_unparsed)
+        layout.addWidget(self.btn_select_all_unparsed)
+
+        self.btn_invert_selection = QPushButton("🔄 反向选择")
+        self.btn_invert_selection.clicked.connect(self.invert_selection)
+        layout.addWidget(self.btn_invert_selection)
+
         layout.addSpacing(20)
 
         self.btn_download = QPushButton("⬇️ 下载选中")
@@ -756,11 +771,6 @@ class MainWindow(QMainWindow):
         self.btn_stop.clicked.connect(self.stop_current_task)
         self.btn_stop.setEnabled(False)
         layout.addWidget(self.btn_stop)
-
-        self.btn_resume = QPushButton("▶️ 继续解析")
-        self.btn_resume.setObjectName("resume_btn")
-        self.btn_resume.clicked.connect(self.resume_parsing)
-        layout.addWidget(self.btn_resume)
 
         layout.addStretch()
 
@@ -1100,49 +1110,7 @@ class MainWindow(QMainWindow):
             self.parse_thread.stop()
             self.statusBar().showMessage("正在终止任务...", 3000)
     
-    def resume_parsing(self):
-        if self.current_album_id is None:
-            QMessageBox.warning(self, "警告", "请先选择一个专辑")
-            return
-        
-        unparsed_tasks = [t for t in self.manager.get_tasks_by_album(self.current_album_id) 
-                         if not t.is_parsed]
-        
-        if not unparsed_tasks:
-            QMessageBox.information(self, "提示", "所有章节已解析完成")
-            return
-        
-        reply = QMessageBox.question(
-            self, "继续解析",
-            f"当前专辑有 {len(unparsed_tasks)} 个章节未解析，是否继续解析？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            self._start_parsing_unparsed(unparsed_tasks)
-        else:
-            self.statusBar().clearMessage()
-    
-    def _start_parsing_unparsed(self, unparsed_tasks: list):
-        self.btn_stop.setEnabled(True)
-        self.btn_search.setEnabled(False)
-        self.btn_import.setEnabled(False)
-        
-        self.statusBar().showMessage(f"正在解析 {len(unparsed_tasks)} 个未解析章节...")
-        
-        self.parse_thread = ParseAlbumThread(
-            self.current_album_id,
-            self.current_album_name,
-            self.current_album_artist,
-            self.manager,
-            resume_list_ids=[t.list_id for t in unparsed_tasks]
-        )
-        self.parse_thread.progress.connect(self.on_parse_progress)
-        self.parse_thread.finished.connect(self.on_parse_finished)
-        self.parse_thread.error.connect(self.on_parse_error)
-        self.parse_thread.saved.connect(self._on_parse_saved)
-        self.parse_thread.start()
-    
+
     def _on_parse_saved(self):
         self._refresh_album_list()
         self.refresh_display()
@@ -1244,8 +1212,57 @@ class MainWindow(QMainWindow):
         
         self._start_parse([t.url for t in unparsed], [t.list_id for t in unparsed])
 
+    def select_all_unparsed(self):
+        if self.current_album_id is not None:
+            tasks = self.manager.get_tasks_by_album(self.current_album_id)
+        else:
+            tasks = list(self.manager.tasks.values())
+        
+        unparsed_tasks = [t for t in tasks if not t.is_parsed]
+        
+        if not unparsed_tasks:
+            QMessageBox.information(self, "提示", "没有未解析的任务")
+            return
+        
+        self.table_view.selectAll()
+        
+        for i in range(self.proxy_model.rowCount()):
+            source_row = self.proxy_model.mapToSource(self.proxy_model.index(i, 0)).row()
+            task = self.model.get_task(source_row)
+            if task and task not in unparsed_tasks:
+                self.table_view.selectionModel().select(
+                    self.proxy_model.index(i, 0),
+                    QItemSelectionModel.SelectionFlag.Deselect | QItemSelectionModel.SelectionFlag.Rows
+                )
+
+    def invert_selection(self):
+        if self.current_album_id is not None:
+            tasks = self.manager.get_tasks_by_album(self.current_album_id)
+        else:
+            tasks = list(self.manager.tasks.values())
+        
+        total_rows = self.proxy_model.rowCount()
+        if total_rows == 0:
+            return
+        
+        current_selected = set()
+        for index in self.table_view.selectedIndexes():
+            row = self.proxy_model.mapToSource(index).row()
+            current_selected.add(row)
+        
+        self.table_view.clearSelection()
+        
+        for i in range(total_rows):
+            source_row = self.proxy_model.mapToSource(self.proxy_model.index(i, 0)).row()
+            if source_row not in current_selected:
+                self.table_view.selectionModel().select(
+                    self.proxy_model.index(i, 0),
+                    QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows
+                )
+
     def _start_parse(self, urls: list, list_ids: list):
         self._set_buttons_enabled(False)
+        self.btn_stop.setEnabled(True)
         
         self.progress_bar.setVisible(True)
         self.progress_bar.setMaximum(len(urls))
@@ -1266,9 +1283,20 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(current)
         self.status_label.setText(f"正在解析 {current}/{total}")
 
-    def on_parse_finished(self, added_count: int, parsed_count: int):
+    def on_parse_finished(self, results: list):
         self._set_buttons_enabled(True)
+        self.btn_stop.setEnabled(False)
         self.progress_bar.setVisible(False)
+        
+        parsed_count = len(results)
+        
+        for audio_info in results:
+            list_id = audio_info.get('list_id')
+            if list_id:
+                audio_url = audio_info.get('url', '')
+                if audio_url:
+                    self.manager.update_audio_url(list_id, audio_url)
+                self.manager.update_parsed_status(list_id, True)
         
         self.manager.save()
         self.refresh_display()
@@ -1281,6 +1309,7 @@ class MainWindow(QMainWindow):
 
     def on_parse_error(self, error: str):
         self._set_buttons_enabled(True)
+        self.btn_stop.setEnabled(False)
         self.progress_bar.setVisible(False)
         self.status_label.setText("")
         QMessageBox.warning(self, "错误", f"解析失败: {error}")
@@ -1312,24 +1341,27 @@ class MainWindow(QMainWindow):
 
     def _start_download(self, tasks: list):
         audio_infos = []
+        download_list_ids = []
         for task in tasks:
             audio_info = self.manager.get_audio_info(task.list_id)
             if audio_info:
                 audio_info['list_id'] = task.list_id
                 audio_infos.append(audio_info)
+                download_list_ids.append(task.list_id)
         
         if not audio_infos:
             QMessageBox.warning(self, "错误", "没有可下载的音频信息")
             return
         
         self._set_buttons_enabled(False)
+        self.btn_stop.setEnabled(True)
         
         self.progress_bar.setVisible(True)
         self.progress_bar.setMaximum(len(audio_infos))
         self.progress_bar.setValue(0)
         self.status_label.setText("正在下载...")
         
-        self.download_list_ids = [t.list_id for t in tasks]
+        self.download_list_ids = download_list_ids
         
         download_dir = self.config.DEFAULT_DOWNLOAD_DIR
         
@@ -1346,6 +1378,7 @@ class MainWindow(QMainWindow):
 
     def on_download_finished(self, success_count: int, total: int):
         self._set_buttons_enabled(True)
+        self.btn_stop.setEnabled(False)
         self.progress_bar.setVisible(False)
         
         for list_id in self.download_list_ids:
@@ -1362,6 +1395,7 @@ class MainWindow(QMainWindow):
     def on_download_error(self, error: str):
         logger.error(f"下载失败: {error}", exc_info=True)
         self._set_buttons_enabled(True)
+        self.btn_stop.setEnabled(False)
         self.progress_bar.setVisible(False)
         self.status_label.setText("")
         QMessageBox.warning(self, "错误", f"下载失败: {error}")
