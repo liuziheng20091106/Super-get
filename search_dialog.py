@@ -1,5 +1,4 @@
 import sys
-import logging
 import requests
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, 
@@ -13,14 +12,9 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QUrl
 
 from search_parser import SearchParser, SearchResult, SearchClient
 from config import Config
+from logger import get_logger
 
-
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    datefmt='%H:%M:%S'
-)
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ImageLoader(QThread):

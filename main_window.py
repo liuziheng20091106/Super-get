@@ -1,3 +1,4 @@
+import os
 import sys
 import json
 import time
@@ -5,6 +6,9 @@ import queue
 import threading
 import requests
 import urllib3
+
+from logger import get_logger
+logger = get_logger(__name__)
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QTableView, QHeaderView, QPushButton, QLineEdit,
@@ -14,7 +18,7 @@ from PyQt6.QtWidgets import (
     QScrollArea, QCheckBox, QComboBox, QSpinBox
 )
 from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, pyqtSignal, QThread, QTimer, QUrl
-from PyQt6.QtGui import QAction, QFont, QColor, QPalette, QIcon, QPixmap
+from PyQt6.QtGui import QAction, QFont, QPalette, QIcon, QPixmap
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 
 from book_task_manager import BookTaskManager, BookTask
@@ -69,6 +73,10 @@ class ParseThread(QThread):
         self.urls = urls
         self.list_ids = list_ids
         self.manager = manager
+        self._stop_flag = False
+
+    def stop(self):
+        self._stop_flag = True
 
     def run(self):
         try:
@@ -79,6 +87,8 @@ class ParseThread(QThread):
             total = len(self.urls)
             
             for i, (url, list_id) in enumerate(zip(self.urls, self.list_ids)):
+                if self._stop_flag:
+                    break
                 self.progress.emit(i + 1, total, url)
                 audio_info = scraper.extract_audio_info(url)
                 if audio_info:
@@ -239,10 +249,11 @@ class DownloadThread(QThread):
     finished = pyqtSignal(int, int)
     error = pyqtSignal(str)
 
-    def __init__(self, audio_infos, download_dir):
+    def __init__(self, audio_infos, download_dir, config):
         super().__init__()
         self.audio_infos = audio_infos
         self.download_dir = download_dir
+        self.config = config
 
     def run(self):
         try:
@@ -259,7 +270,8 @@ class DownloadThread(QThread):
                 audio_info = AudioInfo(
                     name=info.get('name', '未知'),
                     artist=info.get('artist', '未知'),
-                    url=info.get('url', '')
+                    url=info.get('url', ''),
+                    album=info.get('album_name', '')
                 )
                 audio_info.generate_file_path(self.download_dir)
                 
@@ -290,7 +302,9 @@ class BookTaskTableModel(QAbstractTableModel):
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
         if role == Qt.ItemDataRole.DisplayRole:
-            return self.headers[section]
+            if 0 <= section < len(self.headers):
+                return self.headers[section]
+            return None
         return None
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
@@ -316,11 +330,6 @@ class BookTaskTableModel(QAbstractTableModel):
                 return "✓" if task.is_downloaded else "✗"
             elif col == 4:
                 return task.added_time
-        elif role == Qt.ItemDataRole.BackgroundRole:
-            if task.is_downloaded:
-                return QColor(50, 80, 50)
-            elif task.is_parsed:
-                return QColor(80, 80, 50)
         elif role == Qt.ItemDataRole.ToolTipRole:
             return self._build_tooltip(task)
 
@@ -380,31 +389,11 @@ class AlbumListWidget(QWidget):
                 font-size: 14px;
                 font-weight: bold;
                 padding: 10px;
-                background-color: #2d2d2d;
-                border-bottom: 1px solid #3d3d3d;
             }
         """)
         layout.addWidget(header)
 
         self.album_list = QListWidget()
-        self.album_list.setStyleSheet("""
-            QListWidget {
-                background-color: #1e1e1e;
-                border: none;
-                color: #e0e0e0;
-            }
-            QListWidget::item {
-                padding: 12px;
-                border-bottom: 1px solid #2d2d2d;
-            }
-            QListWidget::item:selected {
-                background-color: #667eea;
-                color: white;
-            }
-            QListWidget::item:hover {
-                background-color: #3d3d3d;
-            }
-        """)
         self.album_list.itemClicked.connect(self.on_item_clicked)
         layout.addWidget(self.album_list, 1)
 
@@ -456,9 +445,8 @@ class ResultItemWidget(QWidget):
         self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.cover_label.setStyleSheet("""
             QLabel {
-                background-color: #2d2d2d;
                 border-radius: 6px;
-                border: 1px solid #3d3d3d;
+                border: 1px solid;
             }
         """)
         
@@ -473,22 +461,18 @@ class ResultItemWidget(QWidget):
         
         title_label = QLabel(self.result.title)
         title_label.setFont(QFont("Microsoft YaHei", 11, QFont.Weight.Bold))
-        title_label.setStyleSheet("color: #e0e0e0;")
         title_label.setMaximumWidth(350)
         title_label.setWordWrap(True)
         
         narrator_label = QLabel(f"演播：{self.result.narrator}")
         narrator_label.setFont(QFont("Microsoft YaHei", 9))
-        narrator_label.setStyleSheet("color: #888;")
         
         author_label = QLabel(f"作者：{self.result.author}")
         author_label.setFont(QFont("Microsoft YaHei", 9))
-        author_label.setStyleSheet("color: #888;")
         
         desc = self.result.description[:60] + "..." if len(self.result.description) > 60 else self.result.description
         desc_label = QLabel(desc)
         desc_label.setFont(QFont("Microsoft YaHei", 8))
-        desc_label.setStyleSheet("color: #666;")
         desc_label.setMaximumWidth(350)
         desc_label.setWordWrap(True)
         
@@ -502,18 +486,8 @@ class ResultItemWidget(QWidget):
         
         id_label = QLabel(f"ID: {self.result.book_id}")
         id_label.setFont(QFont("Consolas", 9))
-        id_label.setStyleSheet("color: #9b59b6; font-weight: bold;")
         
         layout.addWidget(id_label, alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
-        
-        self.setStyleSheet("""
-            QWidget {
-                background-color: transparent;
-            }
-            QWidget:hover {
-                background-color: #3d3d3d;
-            }
-        """)
     
     def load_cover(self):
         def handle_reply(reply):
@@ -541,71 +515,6 @@ class SearchResultDialog(QDialog):
     def init_ui(self):
         self.setWindowTitle("搜索有声小说")
         self.setMinimumSize(600, 500)
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #1e1e1e;
-            }
-            QLineEdit {
-                padding: 10px 15px;
-                border: 2px solid #3d3d3d;
-                border-radius: 25px;
-                font-size: 14px;
-                background-color: #2d2d2d;
-                color: #e0e0e0;
-            }
-            QLineEdit:focus {
-                border-color: #667eea;
-            }
-            QLineEdit::placeholder {
-                color: #888;
-            }
-            QPushButton {
-                padding: 10px 25px;
-                border: none;
-                border-radius: 25px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton#search_btn {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #667eea, stop:1 #764ba2);
-                color: white;
-            }
-            QPushButton#search_btn:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #5a6fd6, stop:1 #6a4190);
-            }
-            QPushButton#search_btn:pressed {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4e5fc2, stop:1 #5e377e);
-            }
-            QPushButton#search_btn:disabled {
-                background: #4d4d4d;
-                color: #888;
-            }
-            QListWidget {
-                border: none;
-                background-color: #2d2d2d;
-                color: #e0e0e0;
-            }
-            QListWidget::item {
-                border-bottom: 1px solid #3d3d3d;
-                padding: 10px;
-            }
-            QListWidget::item:selected {
-                background-color: #667eea;
-                color: white;
-            }
-            QLabel {
-                color: #e0e0e0;
-            }
-            QLabel#title_label {
-                font-size: 20px;
-                font-weight: bold;
-                color: white;
-            }
-            QLabel#result_count {
-                color: #888;
-                font-size: 13px;
-            }
-        """)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -613,11 +522,6 @@ class SearchResultDialog(QDialog):
 
         header_widget = QWidget()
         header_widget.setFixedHeight(120)
-        header_widget.setStyleSheet("""
-            QWidget {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #667eea, stop:1 #764ba2);
-            }
-        """)
         header_layout = QVBoxLayout(header_widget)
         header_layout.setContentsMargins(20, 20, 20, 20)
 
@@ -659,7 +563,6 @@ class SearchResultDialog(QDialog):
 
         self.status_label = QLabel("")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_label.setStyleSheet("color: #888; padding: 10px;")
         main_layout.addWidget(self.status_label)
 
     def do_search(self):
@@ -734,8 +637,11 @@ class MainWindow(QMainWindow):
 
     def init_ui(self):
         self.setWindowTitle("有声小说下载管理器")
-        self.setGeometry(100, 100, 1200, 800)
+        self.setGeometry(100, 100, 1500, 800)
         self.setMinimumSize(1000, 700)
+        
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.svg")
+        self.setWindowIcon(QIcon(icon_path))
 
         self._create_menu_bar()
 
@@ -767,24 +673,6 @@ class MainWindow(QMainWindow):
 
     def _create_menu_bar(self):
         menubar = self.menuBar()
-        menubar.setStyleSheet("""
-            QMenuBar {
-                background-color: #2d2d2d;
-                color: #e0e0e0;
-                border-bottom: 1px solid #3d3d3d;
-            }
-            QMenuBar::item:selected {
-                background-color: #3d3d3d;
-            }
-            QMenu {
-                background-color: #2d2d2d;
-                color: #e0e0e0;
-                border: 1px solid #3d3d3d;
-            }
-            QMenu::item:selected {
-                background-color: #3d3d3d;
-            }
-        """)
         
         file_menu = menubar.addMenu("文件")
         
@@ -792,7 +680,7 @@ class MainWindow(QMainWindow):
         action_search.triggered.connect(self.show_search_dialog)
         file_menu.addAction(action_search)
         
-        action_import = QAction("从文件导入", self)
+        action_import = QAction("从保存的专辑HTML导入", self)
         action_import.triggered.connect(self.import_from_file)
         file_menu.addAction(action_import)
         
@@ -830,77 +718,61 @@ class MainWindow(QMainWindow):
 
     def _create_toolbar(self) -> QWidget:
         widget = QWidget()
-        widget.setStyleSheet("background-color: #2d2d2d;")
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 5, 0, 5)
 
-        btn_style = """
-            QPushButton {
-                padding: 8px 15px;
-                border-radius: 4px;
-                background-color: #4CAF50;
-                color: white;
-                border: none;
-                font-weight: bold;
-            }
-            QPushButton:hover { background-color: #45a049; }
-            QPushButton:pressed { background-color: #3d8b40; }
-            QPushButton:disabled { background-color: #4d4d4d; color: #888; }
-        """
-
         self.btn_search = QPushButton("🔍 搜索添加")
-        self.btn_search.setStyleSheet(btn_style)
         self.btn_search.clicked.connect(self.show_search_dialog)
         layout.addWidget(self.btn_search)
 
         self.btn_import = QPushButton("📁 导入文件")
-        self.btn_import.setStyleSheet(btn_style)
         self.btn_import.clicked.connect(self.import_from_file)
         layout.addWidget(self.btn_import)
 
         layout.addSpacing(20)
 
         self.btn_parse = QPushButton("⚡ 解析选中")
-        self.btn_parse.setStyleSheet(btn_style)
         self.btn_parse.clicked.connect(self.parse_selected)
         layout.addWidget(self.btn_parse)
 
         self.btn_parse_all = QPushButton("⚡ 解析全部")
-        self.btn_parse_all.setStyleSheet(btn_style)
         self.btn_parse_all.clicked.connect(self.parse_all_unparsed)
         layout.addWidget(self.btn_parse_all)
 
         layout.addSpacing(20)
 
         self.btn_download = QPushButton("⬇️ 下载选中")
-        self.btn_download.setStyleSheet(btn_style)
         self.btn_download.clicked.connect(self.download_selected)
         layout.addWidget(self.btn_download)
 
         self.btn_download_all = QPushButton("⬇️ 下载全部")
-        self.btn_download_all.setStyleSheet(btn_style)
         self.btn_download_all.clicked.connect(self.download_all_undownloaded)
         layout.addWidget(self.btn_download_all)
 
         layout.addSpacing(20)
 
         self.btn_stop = QPushButton("⏹ 终止任务")
-        self.btn_stop.setStyleSheet(btn_style)
         self.btn_stop.setObjectName("stop_btn")
         self.btn_stop.clicked.connect(self.stop_current_task)
         self.btn_stop.setEnabled(False)
         layout.addWidget(self.btn_stop)
 
         self.btn_resume = QPushButton("▶️ 继续解析")
-        self.btn_resume.setStyleSheet(btn_style)
         self.btn_resume.setObjectName("resume_btn")
         self.btn_resume.clicked.connect(self.resume_parsing)
         layout.addWidget(self.btn_resume)
 
         layout.addStretch()
 
+        self.btn_delete_selected = QPushButton("🗑️ 删除选中")
+        self.btn_delete_selected.clicked.connect(self.delete_selected)
+        layout.addWidget(self.btn_delete_selected)
+
+        self.btn_delete_album = QPushButton("🗑️ 删除本专辑")
+        self.btn_delete_album.clicked.connect(self.delete_current_album)
+        layout.addWidget(self.btn_delete_album)
+
         self.btn_clear = QPushButton("🗑️ 清空已完成")
-        self.btn_clear.setStyleSheet(btn_style)
         self.btn_clear.clicked.connect(self.clear_completed)
         layout.addWidget(self.btn_clear)
 
@@ -911,14 +783,14 @@ class MainWindow(QMainWindow):
         group = QGroupBox("当前任务信息")
         layout = QHBoxLayout()
 
-        self.album_name_label = QLabel("专辑名: 未加载")
+        self.album_name_label = QLabel("专辑名: 未加载分类")
         self.album_id_label = QLabel("专辑ID: -")
         self.album_artist_label = QLabel("艺术家: -")
-        self.task_count_label = QLabel("任务数: 0")
+        self.task_count_label = QLabel("任务数: ")
 
         for label in [self.album_name_label, self.album_id_label, 
                       self.album_artist_label, self.task_count_label]:
-            label.setStyleSheet("font-size: 13px; padding: 5px; color: #e0e0e0;")
+            label.setStyleSheet("font-size: 13px; padding: 5px;")
             layout.addWidget(label)
 
         layout.addStretch()
@@ -933,9 +805,10 @@ class MainWindow(QMainWindow):
         self.table_view = QTableView()
         self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.table_view.setAlternatingRowColors(True)
+        self.table_view.setAlternatingRowColors(False)
         self.table_view.setShowGrid(True)
         self.table_view.setSortingEnabled(True)
+        self.table_view.verticalHeader().setVisible(False)
 
         self.model = BookTaskTableModel()
         self.proxy_model = QSortFilterProxyModel()
@@ -959,8 +832,7 @@ class MainWindow(QMainWindow):
 
     def _create_progress_group(self) -> QWidget:
         widget = QWidget()
-        widget.setStyleSheet("background-color: #2d2d2d;")
-        layout = QVBoxLayout()
+        layout = QVBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
 
         self.progress_bar = QProgressBar()
@@ -968,94 +840,42 @@ class MainWindow(QMainWindow):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat("等待中...")
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                text-align: center;
-                background-color: #2d2d2d;
-                color: #e0e0e0;
-            }
-            QProgressBar::chunk {
-                background-color: #4CAF50;
-            }
-        """)
         layout.addWidget(self.progress_bar)
 
         self.status_label = QLabel("")
-        self.status_label.setStyleSheet("color: #888;")
         layout.addWidget(self.status_label)
 
         widget.setLayout(layout)
         return widget
 
     def _apply_styles(self):
-        self.setStyleSheet("""
-            QMainWindow { background-color: #1e1e1e; }
-            QGroupBox {
-                font-weight: bold;
-                border: 2px solid #3d3d3d;
-                border-radius: 8px;
-                margin-top: 8px;
-                padding-top: 8px;
-                background-color: #2d2d2d;
-                color: #e0e0e0;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-                color: #e0e0e0;
-            }
-            QTableView {
-                background-color: #2d2d2d;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                gridline-color: #3d3d3d;
-                color: #e0e0e0;
-            }
-            QTableView::item { padding: 5px; color: #e0e0e0; }
-            QTableView::item:selected { background-color: #667eea; color: white; }
-            QTableView::item:hover { background-color: #3d3d3d; }
-            QHeaderView::section {
-                background-color: #3d3d3d;
-                padding: 8px;
-                border: none;
-                border-right: 1px solid #4d4d4d;
-                border-bottom: 1px solid #4d4d4d;
-                font-weight: bold;
-                color: #e0e0e0;
-            }
-            QPushButton {
-                padding: 8px 15px;
-                border-radius: 4px;
-                background-color: #4CAF50;
-                color: white;
-                border: none;
-                font-weight: bold;
-            }
-            QPushButton:hover { background-color: #45a049; }
-            QPushButton:pressed { background-color: #3d8b40; }
-            QPushButton:disabled { background-color: #4d4d4d; color: #888; }
-            QLabel { color: #e0e0e0; }
-            QProgressBar {
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                text-align: center;
-                background-color: #2d2d2d;
-                color: #e0e0e0;
-            }
-            QProgressBar::chunk { background-color: #4CAF50; }
-            QMenuBar { background-color: #2d2d2d; color: #e0e0e0; }
-            QMenuBar::item:selected { background-color: #3d3d3d; }
-            QMenu { background-color: #2d2d2d; color: #e0e0e0; }
-            QMenu::item:selected { background-color: #3d3d3d; }
-        """)
+        pass
 
     def load_data(self):
-        if self.manager.load():
-            self._refresh_album_list()
-            self.refresh_display()
+        logger.info("开始加载任务数据...")
+        result = self.manager.load()
+        loaded, reason = result if isinstance(result, tuple) else (result, "unknown")
+        
+        if not loaded:
+            logger.error(f"加载失败: {reason}")
+            if reason == "version_mismatch":
+                QMessageBox.critical(
+                    self, "配置错误",
+                    f"配置文件版本不匹配，请删除配置文件后重试。\n期望版本: {self.manager.CONFIG_VERSION}"
+                )
+            elif reason == "file_not_found":
+                logger.info("配置文件不存在，将创建新配置")
+            else:
+                QMessageBox.critical(
+                    self, "加载错误",
+                    f"加载配置文件失败: {reason}\n请检查日志文件"
+                )
+            sys.exit(1)
+        
+        logger.info(f"加载成功，任务数量: {len(self.manager.tasks)}")
+        self._refresh_album_list()
+        self.refresh_display()
+        logger.info(f"已成功加载 {len(self.manager.tasks)} 个任务")
 
     def _refresh_album_list(self):
         albums = {}
@@ -1086,7 +906,7 @@ class MainWindow(QMainWindow):
             self.album_id_label.setText(f"专辑ID: {self.current_album_id}")
             self.album_artist_label.setText(f"艺术家: {self.current_album_artist}")
         else:
-            self.album_name_label.setText("专辑名: 未加载")
+            self.album_name_label.setText("专辑名: 未加载分类(在左侧选择)")
             self.album_id_label.setText("专辑ID: -")
             self.album_artist_label.setText("艺术家: -")
 
@@ -1145,6 +965,8 @@ class MainWindow(QMainWindow):
         self.fetch_thread.start()
     
     def _on_chapters_fetched(self, book: SearchResult, chapters: list):
+        self.statusBar().clearMessage()
+        
         if not chapters:
             QMessageBox.warning(self, "警告", "未找到章节列表")
             return
@@ -1172,8 +994,11 @@ class MainWindow(QMainWindow):
             self._start_parsing_new_chapters(book, new_chapters)
         elif reply == QMessageBox.StandardButton.No:
             self._add_chapters_only(book, new_chapters)
+        else:
+            self.statusBar().clearMessage()
     
     def _on_chapters_fetch_error(self, book: SearchResult, error_msg: str):
+        self.statusBar().clearMessage()
         QMessageBox.warning(self, "获取章节列表失败", error_msg)
     
     def _start_parsing_new_chapters(self, book: SearchResult, new_chapters: list):
@@ -1223,6 +1048,8 @@ class MainWindow(QMainWindow):
             f"已添加 {result['added_count']} 个章节到列表\n"
             f"可点击'继续解析'按钮解析音频URL"
         )
+        
+        self.statusBar().clearMessage()
     
     def on_parse_progress(self, current: int, total: int, message: str):
         self.statusBar().showMessage(f"解析中 ({current}/{total}): {message}")
@@ -1251,6 +1078,8 @@ class MainWindow(QMainWindow):
             )
         else:
             self.statusBar().showMessage("没有新章节需要解析", 5000)
+        
+        self.statusBar().clearMessage()
     
     def on_parse_error(self, error_msg: str):
         self.btn_stop.setEnabled(False)
@@ -1263,6 +1092,8 @@ class MainWindow(QMainWindow):
         
         self.statusBar().showMessage(f"解析失败: {error_msg}", 5000)
         QMessageBox.warning(self, "解析失败", error_msg)
+        
+        self.statusBar().clearMessage()
     
     def stop_current_task(self):
         if hasattr(self, 'parse_thread') and self.parse_thread.isRunning():
@@ -1289,6 +1120,8 @@ class MainWindow(QMainWindow):
         
         if reply == QMessageBox.StandardButton.Yes:
             self._start_parsing_unparsed(unparsed_tasks)
+        else:
+            self.statusBar().clearMessage()
     
     def _start_parsing_unparsed(self, unparsed_tasks: list):
         self.btn_stop.setEnabled(True)
@@ -1373,11 +1206,14 @@ class MainWindow(QMainWindow):
 
     def get_selected_tasks(self) -> list:
         selected = []
+        rows = set()
         for index in self.table_view.selectedIndexes():
             row = self.proxy_model.mapToSource(index).row()
-            task = self.model.get_task(row)
-            if task:
-                selected.append(task)
+            if row not in rows:
+                rows.add(row)
+                task = self.model.get_task(row)
+                if task:
+                    selected.append(task)
         return selected
 
     def get_selected_list_ids(self) -> list:
@@ -1415,6 +1251,8 @@ class MainWindow(QMainWindow):
         self.progress_bar.setMaximum(len(urls))
         self.progress_bar.setValue(0)
         self.status_label.setText("正在解析...")
+        logger.info(f"开始解析 {len(urls)} 个任务")
+        logger.debug(f"要解析的URL列表: {urls}")
         
         self.parse_list_ids = list_ids
         
@@ -1428,23 +1266,18 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(current)
         self.status_label.setText(f"正在解析 {current}/{total}")
 
-    def on_parse_finished(self, audio_infos: list):
+    def on_parse_finished(self, added_count: int, parsed_count: int):
         self._set_buttons_enabled(True)
         self.progress_bar.setVisible(False)
-        
-        for audio_info in audio_infos:
-            list_id = audio_info.get('list_id')
-            if list_id:
-                self.manager.update_parsed_status(list_id, True)
-                self.manager.update_audio_url(list_id, audio_info.get('url', ''))
         
         self.manager.save()
         self.refresh_display()
         
         QMessageBox.information(
             self, "完成",
-            f"解析完成，成功获取 {len(audio_infos)} 个音频信息"
+            f"解析完成，成功获取 {parsed_count} 个音频信息"
         )
+        logger.info(f"解析完成，成功获取 {parsed_count} 个音频信息")  
 
     def on_parse_error(self, error: str):
         self._set_buttons_enabled(True)
@@ -1500,7 +1333,7 @@ class MainWindow(QMainWindow):
         
         download_dir = self.config.DEFAULT_DOWNLOAD_DIR
         
-        self.download_thread = DownloadThread(audio_infos, download_dir)
+        self.download_thread = DownloadThread(audio_infos, download_dir, self.config)
         self.download_thread.progress.connect(self.on_download_progress)
         self.download_thread.finished.connect(self.on_download_finished)
         self.download_thread.error.connect(self.on_download_error)
@@ -1527,6 +1360,7 @@ class MainWindow(QMainWindow):
         )
 
     def on_download_error(self, error: str):
+        logger.error(f"下载失败: {error}", exc_info=True)
         self._set_buttons_enabled(True)
         self.progress_bar.setVisible(False)
         self.status_label.setText("")
@@ -1564,6 +1398,53 @@ class MainWindow(QMainWindow):
             self._refresh_album_list()
             self.refresh_display()
 
+    def delete_selected(self):
+        selected = self.get_selected_tasks()
+        if not selected:
+            QMessageBox.information(self, "提示", "请先选择要删除的任务")
+            return
+        
+        reply = QMessageBox.question(
+            self, "确认",
+            f"确定要删除选中的 {len(selected)} 个任务吗?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            for task in selected:
+                self.manager.remove_task(task.list_id)
+            self.manager.save()
+            self._refresh_album_list()
+            self.refresh_display()
+
+    def delete_current_album(self):
+        if self.current_album_id is None:
+            QMessageBox.information(self, "提示", "当前没有选中专辑")
+            return
+        
+        album_tasks = self.manager.get_tasks_by_album(self.current_album_id)
+        if not album_tasks:
+            QMessageBox.information(self, "提示", "当前专辑没有任务")
+            return
+        
+        reply = QMessageBox.question(
+            self, "确认",
+            f"确定要删除当前专辑的所有 {len(album_tasks)} 个任务吗?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            for task in album_tasks:
+                self.manager.remove_task(task.list_id)
+            self.manager.save()
+            self.current_album_id = None
+            self.album_name_label.setText("专辑名: 未加载分类")
+            self.album_id_label.setText("专辑ID: -")
+            self.album_artist_label.setText("艺术家: -")
+            self.task_count_label.setText("任务数: ")
+            self._refresh_album_list()
+            self.refresh_display()
+
     def show_about(self):
         QMessageBox.about(
             self, "关于",
@@ -1586,6 +1467,13 @@ def main():
     warmup_requests()
     
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    palette = QPalette()
+    app.setPalette(palette)
+    
+    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.svg")
+    app.setWindowIcon(QIcon(icon_path))
+    
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

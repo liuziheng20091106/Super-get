@@ -3,6 +3,9 @@ import json
 import time
 from typing import List, Dict, Optional
 from dataclasses import dataclass, asdict, field
+from logger import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -33,6 +36,7 @@ class BookTask:
 class BookTaskManager:
     CONFIG_DIR = "config"
     TASKS_FILE = "tasks.json"
+    CONFIG_VERSION = "1.0"
 
     def __init__(self):
         self.tasks: Dict[int, BookTask] = {}
@@ -165,6 +169,7 @@ class BookTaskManager:
             return {
                 'name': task.name,
                 'artist': task.album_artist,
+                'album_name': task.album_name,
                 'url': task.audio_url or task.url
             }
         return None
@@ -176,6 +181,7 @@ class BookTaskManager:
                 audio_infos.append({
                     'name': task.name,
                     'artist': task.album_artist,
+                    'album_name': task.album_name,
                     'url': task.audio_url or task.url
                 })
         return audio_infos
@@ -201,38 +207,57 @@ class BookTaskManager:
 
     def save(self) -> bool:
         try:
+            file_path = self._get_tasks_file_path()
+            logger.info(f"开始保存任务到: {file_path}")
             data = {
+                'version': self.CONFIG_VERSION,
                 'tasks': {str(list_id): task.to_dict() for list_id, task in self.tasks.items()},
                 'occupied_tasks': list(self.occupied_tasks)
             }
             
-            with open(self._get_tasks_file_path(), 'w', encoding='utf-8') as f:
+            logger.info(f"准备保存 {len(self.tasks)} 个任务")
+            with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             
+            logger.info(f"任务保存成功")
             return True
         except Exception as e:
-            print(f"保存任务失败: {e}")
+            logger.error(f"保存任务失败: {e}", exc_info=True)
             return False
 
-    def load(self) -> bool:
+    def load(self) -> tuple:
         try:
             file_path = self._get_tasks_file_path()
+            logger.info(f"尝试加载任务文件: {file_path}")
             if not os.path.exists(file_path):
-                return False
+                logger.warning(f"任务文件不存在: {file_path}")
+                return (False, "file_not_found")
             
+            logger.info(f"任务文件存在，正在读取...")
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
-            self.tasks = {
-                int(list_id): BookTask.from_dict(task_data) 
-                for list_id, task_data in data.get('tasks', {}).items()
-            }
+            saved_version = data.get('version', '')
+            if saved_version != self.CONFIG_VERSION:
+                logger.error(f"配置文件版本不匹配: 期望 {self.CONFIG_VERSION}, 实际 {saved_version}")
+                return (False, "version_mismatch")
+            
+            logger.info(f"JSON数据加载成功")
+            self.tasks = {}
+            for list_id, task_data in data.get('tasks', {}).items():
+                try:
+                    key = int(list_id)
+                except ValueError:
+                    key = list_id
+                self.tasks[key] = BookTask.from_dict(task_data)
+            
             self.occupied_tasks = set(data.get('occupied_tasks', []))
             
-            return True
+            logger.info(f"成功加载 {len(self.tasks)} 个任务，occupied_tasks: {self.occupied_tasks}")
+            return (True, "success")
         except Exception as e:
-            print(f"加载任务失败: {e}")
-            return False
+            logger.error(f"加载任务失败: {e}", exc_info=True)
+            return (False, "error")
 
     def save_book_config(self, list_id: int) -> bool:
         if list_id not in self.tasks:

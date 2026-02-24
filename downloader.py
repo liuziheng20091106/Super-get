@@ -12,6 +12,9 @@ from urllib.error import URLError
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict
 from config import Config
+from logger import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -19,24 +22,26 @@ class AudioInfo:
     name: str
     artist: str
     url: str
+    album: str = ""
     file_path: str = ""
     download_status: str = "pending"
     retry_count: int = 0
     error_message: str = ""
     
-    def __post_init__(self):
-        if not self.file_path:
-            self.generate_file_path()
-    
-    def generate_file_path(self, base_dir: str = "."):
+    def generate_file_path(self, base_dir: str = ""):
+        safe_album = self.sanitize_filename(self.album or "未知专辑")
         safe_artist = self.sanitize_filename(self.artist or "未知艺术家")
         safe_name = self.sanitize_filename(self.name or "未知音频")
         extension = self.get_file_extension()
         
-        artist_dir = os.path.join(base_dir, safe_artist)
-        os.makedirs(artist_dir, exist_ok=True)
+        folder_name = f"{safe_album} - {safe_artist}"
         
-        self.file_path = os.path.join(artist_dir, f"{safe_name}.{extension}")
+        if base_dir:
+            album_dir = os.path.join(base_dir, folder_name)
+            os.makedirs(album_dir, exist_ok=True)
+            self.file_path = os.path.join(album_dir, f"{safe_name}.{extension}")
+        else:
+            self.file_path = os.path.join(folder_name, f"{safe_name}.{extension}")
     
     @staticmethod
     def sanitize_filename(filename: str) -> str:
@@ -130,7 +135,7 @@ class DownloadWorker(threading.Thread):
         if os.path.exists(audio_info.file_path):
             file_size = os.path.getsize(audio_info.file_path)
             if file_size > 1024:
-                print(f"文件已存在，跳过: {audio_info.file_path}")
+                logger.info(f"文件已存在，跳过: {audio_info.file_path}")
                 return True
             else:
                 os.remove(audio_info.file_path)
@@ -166,7 +171,7 @@ class DownloadWorker(threading.Thread):
                     if file_size > 0 and downloaded % (chunk_size * 100) == 0:
                         percent = (downloaded / file_size) * 100
                         short_name = audio_info.name[:30] + "..." if len(audio_info.name) > 30 else audio_info.name
-                        print(f"  {short_name}: {percent:.1f}%")
+                        logger.debug(f"  {short_name}: {percent:.1f}%")
             
             actual_size = os.path.getsize(audio_info.file_path)
             if file_size > 0 and actual_size < file_size * 0.9:
@@ -210,7 +215,8 @@ class AudioDownloader:
                     audio_info = AudioInfo(
                         name=item.get('name', '未知名称'),
                         artist=item.get('artist', '未知艺术家'),
-                        url=item.get('url', '')
+                        url=item.get('url', ''),
+                        album=item.get('album_name', '')
                     )
                     audio_infos.append(audio_info)
             elif isinstance(data, dict) and 'audio_list' in data:
@@ -218,23 +224,24 @@ class AudioDownloader:
                     audio_info = AudioInfo(
                         name=item.get('name', '未知名称'),
                         artist=item.get('artist', '未知艺术家'),
-                        url=item.get('url', '')
+                        url=item.get('url', ''),
+                        album=item.get('album_name', '')
                     )
                     audio_infos.append(audio_info)
             else:
                 raise ValueError("JSON格式不支持")
             
-            print(f"从 {json_file} 加载了 {len(audio_infos)} 个音频信息")
+            logger.info(f"从 {json_file} 加载了 {len(audio_infos)} 个音频信息")
             return audio_infos
             
         except FileNotFoundError:
-            print(f"错误: 文件不存在 - {json_file}")
+            logger.error(f"错误: 文件不存在 - {json_file}")
             return []
         except json.JSONDecodeError:
-            print(f"错误: JSON格式错误 - {json_file}")
+            logger.error(f"错误: JSON格式错误 - {json_file}")
             return []
         except Exception as e:
-            print(f"错误: 加载JSON文件失败 - {e}")
+            logger.error(f"错误: 加载JSON文件失败 - {e}")
             return []
     
     def prepare_tasks(self, audio_infos: List[AudioInfo]):
@@ -254,7 +261,7 @@ class AudioDownloader:
             self.work_queue.put(audio_info)
     
     def start_workers(self):
-        print(f"启动 {self.max_workers} 个工作线程...")
+        logger.info(f"启动 {self.max_workers} 个工作线程...")
         
         for i in range(self.max_workers):
             worker = DownloadWorker(
@@ -267,8 +274,8 @@ class AudioDownloader:
             self.workers.append(worker)
     
     def monitor_progress(self):
-        print(f"\n开始下载 {self.total_files} 个音频文件...")
-        print("=" * 60)
+        logger.info(f"开始下载 {self.total_files} 个音频文件...")
+        logger.debug("=" * 60)
         
         start_time = time.time()
         
@@ -288,7 +295,7 @@ class AudioDownloader:
                     progress = (self.completed_files + self.failed_files) / self.total_files * 100
                     
                     short_name = audio_info.name[:40] + "..." if len(audio_info.name) > 40 else audio_info.name
-                    print(f"{status}: {short_name}")
+                    logger.info(f"{status}: {short_name}")
                     
                     if (self.completed_files + self.failed_files) % 10 == 0 or \
                        (self.completed_files + self.failed_files) == self.total_files:
@@ -308,19 +315,18 @@ class AudioDownloader:
         total = self.total_files
         
         if final:
-            print("\n" + "=" * 60)
-            print("下载完成!")
+            logger.info("下载完成!")
         
-        print(f"进度: {completed + failed}/{total} | 成功: {completed} | 失败: {failed} | 用时: {elapsed_time:.1f}秒")
+        logger.info(f"进度: {completed + failed}/{total} | 成功: {completed} | 失败: {failed} | 用时: {elapsed_time:.1f}秒")
         
         if completed + failed > 0:
             avg_time = elapsed_time / (completed + failed)
-            print(f"平均每个文件: {avg_time:.1f}秒")
+            logger.debug(f"平均每个文件: {avg_time:.1f}秒")
     
     def download(self, json_file: str = None) -> bool:
         audio_infos = self.load_from_json(json_file)
         if not audio_infos:
-            print("没有可下载的音频信息")
+            logger.warning("没有可下载的音频信息")
             return False
         
         self.prepare_tasks(audio_infos)
@@ -337,7 +343,7 @@ class AudioDownloader:
             worker.join(timeout=2)
         
         success_rate = self.completed_files / self.total_files * 100 if self.total_files > 0 else 0
-        print(f"\n最终结果: {self.completed_files}/{self.total_files} 成功 ({success_rate:.1f}%)")
+        logger.info(f"最终结果: {self.completed_files}/{self.total_files} 成功 ({success_rate:.1f}%)")
         
         self.save_results(audio_infos)
         
@@ -362,16 +368,19 @@ class AudioDownloader:
                     f.write(f"保存路径: {audio_info.file_path}\n")
                     f.write("-" * 40 + "\n")
             
-            print(f"下载结果已保存到: {results_file}")
+            logger.info(f"下载结果已保存到: {results_file}")
             
         except Exception as e:
-            print(f"保存下载结果失败: {e}")
+            logger.error(f"保存下载结果失败: {e}")
 
     def download_single(self, audio_info: AudioInfo) -> bool:
+        logger.info(f"开始下载 - 链接: {audio_info.url}")
+        logger.info(f"下载路径: {audio_info.file_path}")
+        
         if os.path.exists(audio_info.file_path):
             file_size = os.path.getsize(audio_info.file_path)
             if file_size > 1024:
-                print(f"文件已存在，跳过: {audio_info.file_path}")
+                logger.info(f"文件已存在，跳过: {audio_info.file_path}")
                 return True
             else:
                 try:
@@ -412,9 +421,11 @@ class AudioDownloader:
                     f.write(chunk)
                     downloaded += len(chunk)
             
+            logger.info(f"下载成功 - 名称: {audio_info.name} | 路径: {audio_info.file_path} | 大小: {downloaded} bytes")
             return True
             
         except Exception as e:
+            logger.error(f"下载失败 - 名称: {audio_info.name} | 链接: {audio_info.url} | 错误: {e}")
             if os.path.exists(audio_info.file_path):
                 try:
                     os.remove(audio_info.file_path)

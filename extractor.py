@@ -1,6 +1,9 @@
 import re
 from typing import List, Dict, Optional
 from config import Config
+from logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class ChapterInfo:
@@ -92,12 +95,12 @@ class LinkExtractor:
                 with open(output_file, 'w', encoding='utf-8') as f:
                     for match in matches:
                         f.write(f"{match}\n")
-                print(f"提取完成！结果已保存到 {output_file}")
+                logger.info(f"提取完成！结果已保存到 {output_file}")
             
             return matches
         except FileNotFoundError:
-            print(f"错误：找不到文件 {input_file}")
+            logger.error(f"错误：找不到文件 {input_file}")
             return []
         except Exception as e:
-            print(f"发生错误：{e}")
+            logger.error(f"发生错误：{e}")
             return []

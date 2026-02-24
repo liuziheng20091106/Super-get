@@ -1,16 +1,10 @@
 import re
 import urllib.parse
-import logging
 from typing import List, Dict, Optional
 from config import Config
+from logger import get_logger
 
-
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    datefmt='%H:%M:%S'
-)
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class SearchResult:

@@ -2,7 +2,7 @@
     "base_url": "https://i275.com",
     "play_url_template": "https://i275.com/play/{}.html",
     "cookie": "PHPSESSID=bmjc7an8kau9cki8nut8048c03",
-    "request_interval": 0.1,
+    "request_interval": 0.5,
     "request_timeout": 10,
     "max_retries": 3,
     "max_workers": 32,
