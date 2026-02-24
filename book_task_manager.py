@@ -163,6 +163,19 @@ class BookTaskManager:
         self.tasks[list_id].audio_url = audio_url
         return True
 
+    def update_task_metadata(self, list_id: int, name: str = None, url: str = None) -> bool:
+        if list_id not in self.tasks:
+            return False
+        
+        task = self.tasks[list_id]
+        if name is not None:
+            task.name = name
+        if url is not None:
+            task.url = url
+        
+        self.save_tasks()
+        return True
+
     def get_audio_info(self, list_id: int) -> Optional[Dict]:
         task = self.tasks.get(list_id)
         if task and task.is_parsed:
@@ -197,6 +210,20 @@ class BookTaskManager:
     
     def get_list_ids_by_album(self, album_id: int) -> List[str]:
         return [task.list_id for task in self.tasks.values() if task.album_id == album_id]
+
+    def update_album_metadata(self, album_id: int, new_name: str = None, new_artist: str = None) -> bool:
+        tasks = self.get_tasks_by_album(album_id)
+        if not tasks:
+            return False
+        
+        for task in tasks:
+            if new_name is not None:
+                task.album_name = new_name
+            if new_artist is not None:
+                task.album_artist = new_artist
+        
+        self.save_tasks()
+        return True
 
     def remove_task(self, list_id: int) -> bool:
         if list_id in self.tasks:

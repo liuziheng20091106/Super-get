@@ -15,9 +15,9 @@ from PyQt6.QtWidgets import (
     QTextEdit, QGroupBox, QDialog, QListWidget, QListWidgetItem,
     QMessageBox, QAbstractItemView, QTabWidget, QProgressBar,
     QStatusBar, QMenuBar, QMenu, QFileDialog, QFrame, QSplitter,
-    QScrollArea, QCheckBox, QComboBox, QSpinBox
+    QScrollArea, QCheckBox, QComboBox, QSpinBox, QFormLayout
 )
-from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, pyqtSignal, QThread, QTimer, QUrl, QItemSelectionModel
+from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, pyqtSignal, QThread, QTimer, QUrl, QItemSelectionModel, QPoint
 from PyQt6.QtGui import QAction, QFont, QPalette, QIcon, QPixmap
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 
@@ -360,8 +360,13 @@ class BookTaskTableModel(QAbstractTableModel):
         self.tasks = tasks
         self.endResetModel()
 
-    def update_task(self, row: int):
+    def update_task(self, row: int, name: str = None, url: str = None):
         if 0 <= row < len(self.tasks):
+            task = self.tasks[row]
+            if name is not None:
+                task.name = name
+            if url is not None:
+                task.url = url
             self.dataChanged.emit(self.index(row, 0), self.index(row, self.columnCount() - 1))
 
     def add_tasks(self, tasks: list):
@@ -379,6 +384,7 @@ class BookTaskTableModel(QAbstractTableModel):
 
 class AlbumListWidget(QWidget):
     album_selected = pyqtSignal(int)
+    album_edit_requested = pyqtSignal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -402,7 +408,23 @@ class AlbumListWidget(QWidget):
 
         self.album_list = QListWidget()
         self.album_list.itemClicked.connect(self.on_item_clicked)
+        self.album_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.album_list.customContextMenuRequested.connect(self.show_context_menu)
         layout.addWidget(self.album_list, 1)
+
+    def show_context_menu(self, pos):
+        item = self.album_list.itemAt(pos)
+        if not item:
+            return
+        
+        album_id = item.data(Qt.ItemDataRole.UserRole)
+        menu = QMenu(self)
+        
+        edit_action = menu.addAction("编辑元数据")
+        action = menu.exec(self.album_list.mapToGlobal(QPoint(pos.x(), pos.y())))
+        
+        if action == edit_action:
+            self.album_edit_requested.emit(album_id)
 
     def set_albums(self, albums: dict):
         self.albums = albums
@@ -430,6 +452,14 @@ class AlbumListWidget(QWidget):
     def remove_album(self, album_id: int):
         if album_id in self.albums:
             del self.albums[album_id]
+            self.set_albums(self.albums)
+
+    def update_album_info(self, album_id: int, name: str = None, artist: str = None):
+        if album_id in self.albums:
+            if name is not None:
+                self.albums[album_id]['name'] = name
+            if artist is not None:
+                self.albums[album_id]['artist'] = artist
             self.set_albums(self.albums)
 
 
@@ -627,6 +657,138 @@ class SearchResultDialog(QDialog):
         return self.selected_book
 
 
+class EditAlbumDialog(QDialog):
+    def __init__(self, album_name: str, album_artist: str, parent=None):
+        super().__init__(parent)
+        self.album_name = album_name
+        self.album_artist = album_artist
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle("编辑专辑元数据")
+        self.setMinimumSize(400, 200)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+
+        title_label = QLabel("编辑专辑信息")
+        title_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        layout.addWidget(title_label)
+
+        form_layout = QFormLayout()
+        form_layout.setSpacing(10)
+
+        self.album_name_input = QLineEdit()
+        self.album_name_input.setText(self.album_name)
+        self.album_name_input.setPlaceholderText("输入专辑名...")
+        form_layout.addRow("专辑名:", self.album_name_input)
+
+        self.album_artist_input = QLineEdit()
+        self.album_artist_input.setText(self.album_artist)
+        self.album_artist_input.setPlaceholderText("输入艺术家名...")
+        form_layout.addRow("艺术家:", self.album_artist_input)
+
+        layout.addLayout(form_layout)
+        layout.addStretch()
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        self.cancel_btn = QPushButton("取消")
+        self.cancel_btn.setFixedSize(80, 35)
+        self.cancel_btn.clicked.connect(self.reject)
+
+        self.ok_btn = QPushButton("确定")
+        self.ok_btn.setFixedSize(80, 35)
+        self.ok_btn.clicked.connect(self.on_ok_clicked)
+
+        button_layout.addWidget(self.cancel_btn)
+        button_layout.addWidget(self.ok_btn)
+
+        layout.addLayout(button_layout)
+
+    def on_ok_clicked(self):
+        new_name = self.album_name_input.text().strip()
+        new_artist = self.album_artist_input.text().strip()
+        
+        if not new_name:
+            QMessageBox.warning(self, "警告", "专辑名不能为空")
+            return
+        
+        self.new_name = new_name
+        self.new_artist = new_artist
+        self.accept()
+
+    def get_values(self):
+        return self.new_name, self.new_artist
+
+
+class EditTaskDialog(QDialog):
+    def __init__(self, task_name: str, task_url: str, parent=None):
+        super().__init__(parent)
+        self.task_name = task_name
+        self.task_url = task_url
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle("编辑单集元数据")
+        self.setMinimumSize(450, 180)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+
+        title_label = QLabel("编辑单集信息")
+        title_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        layout.addWidget(title_label)
+
+        form_layout = QFormLayout()
+        form_layout.setSpacing(10)
+
+        self.task_name_input = QLineEdit()
+        self.task_name_input.setText(self.task_name)
+        self.task_name_input.setPlaceholderText("输入单集名称...")
+        form_layout.addRow("单集名称:", self.task_name_input)
+
+        self.task_url_input = QLineEdit()
+        self.task_url_input.setText(self.task_url)
+        self.task_url_input.setPlaceholderText("输入音频URL...")
+        form_layout.addRow("音频URL:", self.task_url_input)
+
+        layout.addLayout(form_layout)
+        layout.addStretch()
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        self.cancel_btn = QPushButton("取消")
+        self.cancel_btn.setFixedSize(80, 35)
+        self.cancel_btn.clicked.connect(self.reject)
+
+        self.ok_btn = QPushButton("确定")
+        self.ok_btn.setFixedSize(80, 35)
+        self.ok_btn.clicked.connect(self.on_ok_clicked)
+
+        button_layout.addWidget(self.cancel_btn)
+        button_layout.addWidget(self.ok_btn)
+
+        layout.addLayout(button_layout)
+
+    def on_ok_clicked(self):
+        new_name = self.task_name_input.text().strip()
+        new_url = self.task_url_input.text().strip()
+        
+        if not new_name:
+            QMessageBox.warning(self, "警告", "单集名称不能为空")
+            return
+        
+        self.new_name = new_name
+        self.new_url = new_url
+        self.accept()
+
+    def get_values(self):
+        return self.new_name, self.new_url
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -662,6 +824,7 @@ class MainWindow(QMainWindow):
         self.album_list_widget = AlbumListWidget()
         self.album_list_widget.setFixedWidth(220)
         self.album_list_widget.album_selected.connect(self.on_album_selected)
+        self.album_list_widget.album_edit_requested.connect(self.on_album_edit_requested)
         main_layout.addWidget(self.album_list_widget)
 
         right_panel = QWidget()
@@ -836,6 +999,9 @@ class MainWindow(QMainWindow):
         self.table_view.setColumnWidth(2, 70)
         self.table_view.setColumnWidth(3, 70)
 
+        self.table_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table_view.customContextMenuRequested.connect(self.show_task_context_menu)
+
         layout.addWidget(self.table_view)
         widget.setLayout(layout)
         return widget
@@ -945,6 +1111,66 @@ class MainWindow(QMainWindow):
             self.current_album_name = tasks[0].album_name
             self.current_album_artist = tasks[0].album_artist
             self.refresh_display()
+
+    def on_album_edit_requested(self, album_id: int):
+        tasks = self.manager.get_tasks_by_album(album_id)
+        if not tasks:
+            QMessageBox.warning(self, "警告", "未找到该专辑")
+            return
+        
+        current_name = tasks[0].album_name
+        current_artist = tasks[0].album_artist
+        
+        dialog = EditAlbumDialog(current_name, current_artist, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            new_name, new_artist = dialog.get_values()
+            
+            if self.manager.update_album_metadata(album_id, new_name, new_artist):
+                self.album_list_widget.update_album_info(album_id, new_name, new_artist)
+                
+                if self.current_album_id == album_id:
+                    self.current_album_name = new_name
+                    self.current_album_artist = new_artist
+                    self.album_name_label.setText(f"专辑名: {new_name}")
+                    self.refresh_display()
+                
+                QMessageBox.information(self, "成功", "专辑元数据已更新")
+            else:
+                QMessageBox.warning(self, "错误", "更新专辑元数据失败")
+
+    def show_task_context_menu(self, pos):
+        index = self.table_view.indexAt(pos)
+        if not index.isValid():
+            return
+        
+        source_row = self.proxy_model.mapToSource(index).row()
+        task = self.model.get_task(source_row)
+        if not task:
+            return
+        
+        menu = QMenu(self)
+        
+        edit_action = menu.addAction("编辑元数据")
+        action = menu.exec(self.table_view.viewport().mapToGlobal(QPoint(pos.x(), pos.y())))
+        
+        if action == edit_action:
+            self.on_task_edit_requested(source_row)
+
+    def on_task_edit_requested(self, row: int):
+        task = self.model.get_task(row)
+        if not task:
+            QMessageBox.warning(self, "警告", "未找到该任务")
+            return
+        
+        dialog = EditTaskDialog(task.name, task.url, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            new_name, new_url = dialog.get_values()
+            
+            if self.manager.update_task_metadata(task.list_id, new_name, new_url):
+                self.model.update_task(row, new_name, new_url)
+                QMessageBox.information(self, "成功", "单集元数据已更新")
+            else:
+                QMessageBox.warning(self, "错误", "更新单集元数据失败")
 
     def show_search_dialog(self):
         dialog = SearchResultDialog(self)
