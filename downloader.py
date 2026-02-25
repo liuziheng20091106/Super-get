@@ -122,6 +122,14 @@ class DownloadWorker(threading.Thread):
                 if self.download_file(audio_info):
                     return True
             except Exception as e:
+                error_str = str(e)
+                if '403' in error_str or 'HTTP Error 403' in error_str:
+                    audio_info.retry_count = attempt + 1
+                    audio_info.error_message = "链接已过期(403)"
+                    audio_info.download_status = "expired"
+                    logger.warning(f"链接过期，跳过重试: {audio_info.url}")
+                    return False
+                
                 audio_info.retry_count = attempt + 1
                 audio_info.error_message = f"尝试 {attempt + 1}/{self.max_retries} 失败: {e}"
                 
@@ -131,7 +139,11 @@ class DownloadWorker(threading.Thread):
         
         return False
     
-    def download_file(self, audio_info: AudioInfo) -> bool:
+    def _download_core(self, audio_info: AudioInfo, timeout: int,
+                       headers: Dict, opener,
+                       progress_callback=None,
+                       stop_check_callback=None,
+                       verify_size: bool = True) -> bool:
         if os.path.exists(audio_info.file_path):
             file_size = os.path.getsize(audio_info.file_path)
             if file_size > 1024:
@@ -139,46 +151,63 @@ class DownloadWorker(threading.Thread):
                 return True
             else:
                 os.remove(audio_info.file_path)
-        
-        request = Request(audio_info.url, headers=self.headers)
-        socket.setdefaulttimeout(self.timeout)
-        
-        try:
-            response = self.opener.open(request)
-            
-            file_size = 0
-            if 'content-length' in response.headers:
-                file_size = int(response.headers['content-length'])
-            
-            downloaded = 0
-            chunk_size = 8192
-            
-            with open(audio_info.file_path, 'wb') as f:
-                while True:
-                    if self._stop_event.is_set():
-                        f.close()
-                        if os.path.exists(audio_info.file_path):
-                            os.remove(audio_info.file_path)
-                        return False
-                    
-                    chunk = response.read(chunk_size)
-                    if not chunk:
-                        break
-                    
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    
-                    if file_size > 0 and downloaded % (chunk_size * 100) == 0:
-                        percent = (downloaded / file_size) * 100
-                        short_name = audio_info.name[:30] + "..." if len(audio_info.name) > 30 else audio_info.name
-                        logger.debug(f"  {short_name}: {percent:.1f}%")
-            
+
+        request = Request(audio_info.url, headers=headers)
+        socket.setdefaulttimeout(timeout)
+
+        response = opener.open(request)
+
+        file_size = 0
+        if 'content-length' in response.headers:
+            file_size = int(response.headers['content-length'])
+
+        downloaded = 0
+        chunk_size = 8192
+
+        with open(audio_info.file_path, 'wb') as f:
+            while True:
+                if stop_check_callback and stop_check_callback():
+                    f.close()
+                    if os.path.exists(audio_info.file_path):
+                        os.remove(audio_info.file_path)
+                    return False
+
+                chunk = response.read(chunk_size)
+                if not chunk:
+                    break
+
+                f.write(chunk)
+                downloaded += len(chunk)
+
+                if progress_callback and file_size > 0 and downloaded % (chunk_size * 100) == 0:
+                    progress_callback(downloaded, file_size, audio_info.name)
+
+        if verify_size and file_size > 0:
             actual_size = os.path.getsize(audio_info.file_path)
-            if file_size > 0 and actual_size < file_size * 0.9:
+            if actual_size < file_size * 0.9:
                 raise ValueError(f"文件大小不完整: {actual_size}/{file_size}")
-            
-            return True
-            
+
+        return True
+
+    def download_file(self, audio_info: AudioInfo) -> bool:
+        def progress_callback(downloaded: int, total_size: int, name: str):
+            percent = (downloaded / total_size) * 100
+            short_name = name[:30] + "..." if len(name) > 30 else name
+            logger.debug(f"  {short_name}: {percent:.1f}%")
+
+        def stop_check_callback():
+            return self._stop_event.is_set()
+
+        try:
+            return self._download_core(
+                audio_info=audio_info,
+                timeout=self.timeout,
+                headers=self.headers,
+                opener=self.opener,
+                progress_callback=progress_callback,
+                stop_check_callback=stop_check_callback,
+                verify_size=True
+            )
         except (URLError, socket.timeout, ConnectionError) as e:
             if os.path.exists(audio_info.file_path):
                 try:
@@ -287,6 +316,9 @@ class AudioDownloader:
                     if audio_info.download_status == "success":
                         self.completed_files += 1
                         status = "✓ 成功"
+                    elif audio_info.download_status == "expired":
+                        self.failed_files += 1
+                        status = "⚠ 链接过期"
                     else:
                         self.failed_files += 1
                         status = f"✗ 失败 (重试 {audio_info.retry_count} 次)"
@@ -373,10 +405,10 @@ class AudioDownloader:
         except Exception as e:
             logger.error(f"保存下载结果失败: {e}")
 
-    def download_single(self, audio_info: AudioInfo) -> bool:
-        logger.info(f"开始下载 - 链接: {audio_info.url}")
-        logger.info(f"下载路径: {audio_info.file_path}")
-        
+    @staticmethod
+    def _download_core_static(audio_info: AudioInfo, timeout: int,
+                              headers: Dict, opener,
+                              verify_size: bool = False) -> bool:
         if os.path.exists(audio_info.file_path):
             file_size = os.path.getsize(audio_info.file_path)
             if file_size > 1024:
@@ -387,32 +419,20 @@ class AudioDownloader:
                     os.remove(audio_info.file_path)
                 except:
                     pass
-        
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
-        
-        opener = build_opener()
-        
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': '*/*',
-            'Accept-Language': 'zh-CN,zh;q=0.9',
-        }
-        
+
+        request = Request(audio_info.url, headers=headers)
+        socket.setdefaulttimeout(timeout)
+
         try:
-            request = Request(audio_info.url, headers=headers)
-            socket.setdefaulttimeout(self.max_retries)
-            
             response = opener.open(request)
-            
+
             file_size = 0
             if 'content-length' in response.headers:
                 file_size = int(response.headers['content-length'])
-            
+
             downloaded = 0
             chunk_size = 8192
-            
+
             with open(audio_info.file_path, 'wb') as f:
                 while True:
                     chunk = response.read(chunk_size)
@@ -420,10 +440,15 @@ class AudioDownloader:
                         break
                     f.write(chunk)
                     downloaded += len(chunk)
-            
+
+            if verify_size and file_size > 0:
+                actual_size = os.path.getsize(audio_info.file_path)
+                if actual_size < file_size * 0.9:
+                    raise ValueError(f"文件大小不完整: {actual_size}/{file_size}")
+
             logger.info(f"下载成功 - 名称: {audio_info.name} | 路径: {audio_info.file_path} | 大小: {downloaded} bytes")
             return True
-            
+
         except Exception as e:
             logger.error(f"下载失败 - 名称: {audio_info.name} | 链接: {audio_info.url} | 错误: {e}")
             if os.path.exists(audio_info.file_path):
@@ -433,3 +458,29 @@ class AudioDownloader:
                     pass
             audio_info.error_message = str(e)
             return False
+
+    def download_single(self, audio_info: AudioInfo) -> bool:
+        logger.info(f"开始下载 - 链接: {audio_info.url}")
+        logger.info(f"下载路径: {audio_info.file_path}")
+
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+
+        opener = build_opener()
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': '*/*',
+            'Accept-Language': 'zh-CN,zh;q=0.9',
+        }
+
+        timeout = self.config.DOWNLOAD_TIMEOUT
+
+        return self._download_core_static(
+            audio_info=audio_info,
+            timeout=timeout,
+            headers=headers,
+            opener=opener,
+            verify_size=False
+        )

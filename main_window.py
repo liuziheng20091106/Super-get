@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QScrollArea, QCheckBox, QComboBox, QSpinBox, QFormLayout
 )
 from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, pyqtSignal, QThread, QTimer, QUrl, QItemSelectionModel, QPoint
-from PyQt6.QtGui import QAction, QFont, QPalette, QIcon, QPixmap
+from PyQt6.QtGui import QAction, QFont, QPalette, QIcon, QPixmap, QDesktopServices
 import re
 
 
@@ -294,7 +294,7 @@ class ParseAlbumThread(QThread):
             
             self.progress.emit(total, total, "解析完成")
             added = parsed_count if not self._stop_flag else 0
-            self.finished.emit(added, parsed_count)
+            self.finished.emit(added, parsed_count, True)
             
         except Exception as e:
             self.error.emit(str(e))
@@ -941,6 +941,16 @@ class MainWindow(QMainWindow):
         
         help_menu = menubar.addMenu("帮助")
         
+        action_open_log_folder = QAction("打开日志文件夹", self)
+        action_open_log_folder.triggered.connect(self.open_log_folder)
+        help_menu.addAction(action_open_log_folder)
+        
+        action_open_download_folder = QAction("打开下载文件夹", self)
+        action_open_download_folder.triggered.connect(self.open_download_folder)
+        help_menu.addAction(action_open_download_folder)
+        
+        help_menu.addSeparator()
+        
         action_about = QAction("关于", self)
         action_about.triggered.connect(self.show_about)
         help_menu.addAction(action_about)
@@ -1371,7 +1381,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"解析完成，成功解析 {added_count}/{parsed_count} 个章节", 5000)
             QMessageBox.information(
                 self, "完成", 
-                f"已成功解析专辑: {self.current_album_name}\n成功解析: {added_count}/{parsed_count} 个章节"
+                f"已成功解析专辑: {self.current_album_name}\n成功解析: {added_count}/{parsed_count} 个章节\n\n解析结果有时限，如无法下载请重新解析"
             )
         else:
             self.statusBar().showMessage("没有新章节需要解析", 5000)
@@ -1609,7 +1619,7 @@ class MainWindow(QMainWindow):
         
         QMessageBox.information(
             self, "完成",
-            f"解析完成，成功获取 {parsed_count} 个音频信息"
+            f"解析完成，成功获取 {parsed_count} 个音频信息\n\n解析结果有时限，如无法下载请重新解析"
         )
         logger.info(f"解析完成，成功获取 {parsed_count} 个音频信息")  
 
@@ -1786,6 +1796,22 @@ class MainWindow(QMainWindow):
             self.task_count_label.setText("任务数: ")
             self._refresh_album_list()
             self.refresh_display()
+
+    def open_log_folder(self):
+        log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "log")
+        if os.path.exists(log_dir):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(log_dir))
+        else:
+            QMessageBox.warning(self, "警告", "日志文件夹不存在")
+
+    def open_download_folder(self):
+        download_dir = self.config.DEFAULT_DOWNLOAD_DIR
+        if not os.path.isabs(download_dir):
+            download_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), download_dir)
+        if os.path.exists(download_dir):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(download_dir))
+        else:
+            QMessageBox.warning(self, "警告", "下载文件夹不存在")
 
     def show_about(self):
         QMessageBox.about(
