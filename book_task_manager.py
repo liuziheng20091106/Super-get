@@ -173,7 +173,7 @@ class BookTaskManager:
         if url is not None:
             task.url = url
         
-        self.save_tasks()
+        self.save()
         return True
 
     def get_audio_info(self, list_id: int) -> Optional[Dict]:
@@ -222,7 +222,7 @@ class BookTaskManager:
             if new_artist is not None:
                 task.album_artist = new_artist
         
-        self.save_tasks()
+        self.save()
         return True
 
     def remove_task(self, list_id: int) -> bool:

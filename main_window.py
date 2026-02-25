@@ -19,6 +19,55 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, pyqtSignal, QThread, QTimer, QUrl, QItemSelectionModel, QPoint
 from PyQt6.QtGui import QAction, QFont, QPalette, QIcon, QPixmap
+import re
+
+
+class NaturalSortProxyModel(QSortFilterProxyModel):
+    def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:
+        if not left.isValid() or not right.isValid():
+            return super().lessThan(left, right)
+
+        left_data = left.data(Qt.ItemDataRole.DisplayRole)
+        right_data = right.data(Qt.ItemDataRole.DisplayRole)
+
+        if left_data is None or right_data is None:
+            return super().lessThan(left, right)
+
+        return self._natural_compare(str(left_data), str(right_data))
+
+    def _natural_compare(self, s1: str, s2: str) -> bool:
+        pattern = re.compile(r'(\d+)|(\D+)')
+
+        parts1 = pattern.findall(s1)
+        parts2 = pattern.findall(s2)
+
+        len1 = len(parts1)
+        len2 = len(parts2)
+
+        for i in range(max(len1, len2)):
+            if i >= len1:
+                return True
+            if i >= len2:
+                return False
+
+            p1 = parts1[i]
+            p2 = parts2[i]
+
+            if p1[0] and p2[0]:
+                num1 = int(p1[0])
+                num2 = int(p2[0])
+                if num1 != num2:
+                    return num1 < num2
+            elif p1[1] and p2[1]:
+                if p1[1] != p2[1]:
+                    return p1[1] < p2[1]
+            else:
+                if p1[0]:
+                    return True
+                else:
+                    return False
+
+        return False
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 
 from book_task_manager import BookTaskManager, BookTask
@@ -188,7 +237,7 @@ class ParseAlbumThread(QThread):
                 self.finished.emit(0, 0)
                 return
             
-            self.progress.emit(20, 100, f"找到 {len(new_chapters)} 个新章节，正在解析音频URL...")
+            self.progress.emit(0, len(new_chapters), f"找到 {len(new_chapters)} 个新章节，正在解析音频URL...")
             
             scraper = AudioScraper()
             scraper.init_session()
@@ -203,7 +252,7 @@ class ParseAlbumThread(QThread):
                 if self._stop_flag:
                     break
                 
-                self.progress.emit(20 + int(70 * (i + 1) / total), 100, f"解析第 {i+1}/{total} 集")
+                self.progress.emit(i + 1, total, f"解析第 {i+1}/{total} 集")
                 
                 audio_info = scraper.extract_audio_info(url)
                 
@@ -243,7 +292,7 @@ class ParseAlbumThread(QThread):
                 self.saved.emit()
                 books = []
             
-            self.progress.emit(100, 100, "解析完成")
+            self.progress.emit(total, total, "解析完成")
             added = parsed_count if not self._stop_flag else 0
             self.finished.emit(added, parsed_count)
             
@@ -252,7 +301,7 @@ class ParseAlbumThread(QThread):
 
 
 class DownloadThread(QThread):
-    progress = pyqtSignal(str, str)
+    progress = pyqtSignal(int, int, str, str)
     finished = pyqtSignal(int, int)
     error = pyqtSignal(str)
 
@@ -261,6 +310,10 @@ class DownloadThread(QThread):
         self.audio_infos = audio_infos
         self.download_dir = download_dir
         self.config = config
+        self._stop_flag = False
+
+    def stop(self):
+        self._stop_flag = True
 
     def run(self):
         try:
@@ -274,6 +327,8 @@ class DownloadThread(QThread):
             total = len(self.audio_infos)
             
             for i, info in enumerate(self.audio_infos):
+                if self._stop_flag:
+                    break
                 audio_info = AudioInfo(
                     name=info.get('name', '未知'),
                     artist=info.get('artist', '未知'),
@@ -282,13 +337,13 @@ class DownloadThread(QThread):
                 )
                 audio_info.generate_file_path(self.download_dir)
                 
-                self.progress.emit(audio_info.name, "downloading")
+                self.progress.emit(i + 1, total, audio_info.name, "downloading")
                 
                 if downloader.download_single(audio_info):
                     success_count += 1
-                    self.progress.emit(audio_info.name, "success")
+                    self.progress.emit(i + 1, total, audio_info.name, "success")
                 else:
-                    self.progress.emit(audio_info.name, "failed")
+                    self.progress.emit(i + 1, total, audio_info.name, "failed")
             
             self.finished.emit(success_count, total)
         except Exception as e:
@@ -854,6 +909,10 @@ class MainWindow(QMainWindow):
         action_import.triggered.connect(self.import_from_file)
         file_menu.addAction(action_import)
         
+        action_update_catalog = QAction("更新目录", self)
+        action_update_catalog.triggered.connect(self.update_catalog)
+        file_menu.addAction(action_update_catalog)
+        
         file_menu.addSeparator()
         
         action_exit = QAction("退出", self)
@@ -898,6 +957,10 @@ class MainWindow(QMainWindow):
         self.btn_import = QPushButton("📁 导入文件")
         self.btn_import.clicked.connect(self.import_from_file)
         layout.addWidget(self.btn_import)
+
+        self.btn_update_catalog = QPushButton("🔄 更新目录")
+        self.btn_update_catalog.clicked.connect(self.update_catalog)
+        layout.addWidget(self.btn_update_catalog)
 
         layout.addSpacing(20)
 
@@ -984,7 +1047,7 @@ class MainWindow(QMainWindow):
         self.table_view.verticalHeader().setVisible(False)
 
         self.model = BookTaskTableModel()
-        self.proxy_model = QSortFilterProxyModel()
+        self.proxy_model = NaturalSortProxyModel()
         self.proxy_model.setSourceModel(self.model)
         self.table_view.setModel(self.proxy_model)
 
@@ -1013,7 +1076,7 @@ class MainWindow(QMainWindow):
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setRange(0, 0)
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat("等待中...")
         layout.addWidget(self.progress_bar)
@@ -1133,8 +1196,6 @@ class MainWindow(QMainWindow):
                     self.current_album_artist = new_artist
                     self.album_name_label.setText(f"专辑名: {new_name}")
                     self.refresh_display()
-                
-                QMessageBox.information(self, "成功", "专辑元数据已更新")
             else:
                 QMessageBox.warning(self, "错误", "更新专辑元数据失败")
 
@@ -1168,7 +1229,6 @@ class MainWindow(QMainWindow):
             
             if self.manager.update_task_metadata(task.list_id, new_name, new_url):
                 self.model.update_task(row, new_name, new_url)
-                QMessageBox.information(self, "成功", "单集元数据已更新")
             else:
                 QMessageBox.warning(self, "错误", "更新单集元数据失败")
 
@@ -1290,8 +1350,9 @@ class MainWindow(QMainWindow):
     def on_parse_progress(self, current: int, total: int, message: str):
         self.statusBar().showMessage(f"解析中 ({current}/{total}): {message}")
         if hasattr(self, 'progress_bar'):
+            self.progress_bar.setMaximum(total)
             self.progress_bar.setValue(current)
-            self.progress_bar.setFormat(f"{current}% - {message}")
+            self.progress_bar.setFormat(f"{current}/{total} - {message}")
     
     def on_parse_finished(self, added_count: int, parsed_count: int):
         self.manager.save()
@@ -1303,8 +1364,8 @@ class MainWindow(QMainWindow):
         self.btn_import.setEnabled(True)
         
         if hasattr(self, 'progress_bar'):
-            self.progress_bar.setValue(100)
-            self.progress_bar.setFormat("完成")
+            self.progress_bar.setValue(parsed_count)
+            self.progress_bar.setFormat(f"{parsed_count}/{parsed_count} - 完成")
         
         if added_count > 0:
             self.statusBar().showMessage(f"解析完成，成功解析 {added_count}/{parsed_count} 个章节", 5000)
@@ -1332,9 +1393,13 @@ class MainWindow(QMainWindow):
         self.statusBar().clearMessage()
     
     def stop_current_task(self):
-        if hasattr(self, 'parse_thread') and self.parse_thread.isRunning():
+        if hasattr(self, 'parse_thread') and self.parse_thread and self.parse_thread.isRunning():
             self.parse_thread.stop()
             self.statusBar().showMessage("正在终止任务...", 3000)
+        
+        if hasattr(self, 'download_thread') and self.download_thread and self.download_thread.isRunning():
+            self.download_thread.stop()
+            self.statusBar().showMessage("正在终止下载任务...", 3000)
     
 
     def _on_parse_saved(self):
@@ -1368,6 +1433,19 @@ class MainWindow(QMainWindow):
                     
             except Exception as e:
                 QMessageBox.critical(self, "错误", f"读取文件失败: {e}")
+
+    def update_catalog(self):
+        if self.current_album_id is None:
+            QMessageBox.information(self, "提示", "请先在左侧选择一个专辑")
+            return
+        
+        book = type('obj', (object,), {
+            'book_id': str(self.current_album_id),
+            'title': self.current_album_name,
+            'narrator': self.current_album_artist
+        })()
+        
+        self._fetch_chapter_list_and_ask(book)
 
     def add_tasks_from_play_ids(self, play_ids: list):
         urls = [self.config.PLAY_URL_TEMPLATE.format(pid) for pid in play_ids]
@@ -1506,7 +1584,9 @@ class MainWindow(QMainWindow):
         self.parse_thread.start()
 
     def on_parse_progress(self, current: int, total: int, url: str):
+        self.progress_bar.setMaximum(total)
         self.progress_bar.setValue(current)
+        self.progress_bar.setFormat(f"{current}/{total}")
         self.status_label.setText(f"正在解析 {current}/{total}")
 
     def on_parse_finished(self, results: list):
@@ -1597,9 +1677,10 @@ class MainWindow(QMainWindow):
         self.download_thread.error.connect(self.on_download_error)
         self.download_thread.start()
 
-    def on_download_progress(self, name: str, status: str):
-        current = self.progress_bar.value()
-        self.progress_bar.setValue(current + 1)
+    def on_download_progress(self, current: int, total: int, name: str, status: str):
+        self.progress_bar.setMaximum(total)
+        self.progress_bar.setValue(current)
+        self.progress_bar.setFormat(f"{current}/{total}")
         self.status_label.setText(f"正在下载: {name[:30]}...")
 
     def on_download_finished(self, success_count: int, total: int):
@@ -1629,6 +1710,7 @@ class MainWindow(QMainWindow):
     def _set_buttons_enabled(self, enabled: bool):
         self.btn_search.setEnabled(enabled)
         self.btn_import.setEnabled(enabled)
+        self.btn_update_catalog.setEnabled(enabled)
         self.btn_parse.setEnabled(enabled)
         self.btn_parse_all.setEnabled(enabled)
         self.btn_download.setEnabled(enabled)
