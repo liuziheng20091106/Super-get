@@ -1086,6 +1086,7 @@ class MainWindow(QMainWindow):
         
         self.parse_thread = None
         self.download_thread = None
+        self.auto_download_after_parse = False
         
         self.init_ui()
         self.load_data()
@@ -1173,6 +1174,10 @@ class MainWindow(QMainWindow):
         action_download_all = QAction("下载全部未下载", self)
         action_download_all.triggered.connect(self.download_all_undownloaded)
         task_menu.addAction(action_download_all)
+
+        action_parse_and_download_all = QAction("解析并下载全部", self)
+        action_parse_and_download_all.triggered.connect(self.parse_and_download_all)
+        task_menu.addAction(action_parse_and_download_all)
         
         task_menu.addSeparator()
         
@@ -1246,6 +1251,10 @@ class MainWindow(QMainWindow):
         self.btn_download_all = QPushButton("⬇️ 下载全部")
         self.btn_download_all.clicked.connect(self.download_all_undownloaded)
         layout.addWidget(self.btn_download_all)
+
+        self.btn_parse_and_download_all = QPushButton("⚡⬇️ 解析并下载全部")
+        self.btn_parse_and_download_all.clicked.connect(self.parse_and_download_all)
+        layout.addWidget(self.btn_parse_and_download_all)
 
         layout.addSpacing(20)
 
@@ -1999,7 +2008,6 @@ class MainWindow(QMainWindow):
     def on_parse_finished(self, results: list):
         self._set_buttons_enabled(True)
         self.btn_stop.setEnabled(False)
-        self.progress_bar.setVisible(False)
         
         parsed_count = len(results)
         
@@ -2014,6 +2022,22 @@ class MainWindow(QMainWindow):
         self.manager.save()
         self.refresh_display()
         
+        if self.auto_download_after_parse:
+            self.auto_download_after_parse = False
+            self.statusBar().showMessage(f"解析完成，开始下载 {parsed_count} 个任务...", 3000)
+            logger.info(f"解析完成，成功获取 {parsed_count} 个音频信息，开始自动下载")
+            
+            tasks_to_download = []
+            for list_id in self.parse_list_ids:
+                task = self.manager.tasks.get(list_id)
+                if task and task.is_parsed:
+                    tasks_to_download.append(task)
+            
+            if tasks_to_download:
+                self._start_download(tasks_to_download)
+                return
+        
+        self.progress_bar.setVisible(False)
         QMessageBox.information(
             self, "完成",
             f"解析完成，成功获取 {parsed_count} 个音频信息\n\n解析结果有时限，如无法下载请重新解析"
@@ -2051,6 +2075,47 @@ class MainWindow(QMainWindow):
             return
         
         self._start_download(undownloaded)
+
+    def parse_and_download_all(self):
+        """解析全部未解析的任务，解析完成后自动下载"""
+        if self.current_album_id is not None:
+            all_tasks = self.manager.get_tasks_by_album(self.current_album_id)
+        else:
+            all_tasks = list(self.manager.tasks.values())
+
+        parsed = [t for t in all_tasks if t.is_parsed]
+        unparsed = [t for t in all_tasks if not t.is_parsed]
+
+        if not unparsed and not parsed:
+            QMessageBox.information(self, "提示", "没有可解析的任务")
+            return
+
+        if parsed and unparsed:
+            reply = QMessageBox.question(
+                self, "确认",
+                f"有 {len(parsed)} 个任务已解析，是否重新解析全部？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._start_parse_and_download([t.url for t in all_tasks], [t.list_id for t in all_tasks])
+            else:
+                self._start_parse_and_download([t.url for t in unparsed], [t.list_id for t in unparsed])
+        elif parsed:
+            reply = QMessageBox.question(
+                self, "确认",
+                f"所有 {len(parsed)} 个任务都已解析，是否重新解析？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._start_parse_and_download([t.url for t in parsed], [t.list_id for t in parsed])
+        else:
+            self._start_parse_and_download([t.url for t in unparsed], [t.list_id for t in unparsed])
+
+    def _start_parse_and_download(self, urls: list, list_ids: list):
+        """开始解析，解析完成后自动下载"""
+        self.auto_download_after_parse = True
+        self.parse_list_ids = list_ids
+        self._start_parse(urls, list_ids)
 
     def _start_download(self, tasks: list):
         audio_infos = []
@@ -2133,6 +2198,7 @@ class MainWindow(QMainWindow):
         self.btn_parse_all.setEnabled(enabled)
         self.btn_download.setEnabled(enabled)
         self.btn_download_all.setEnabled(enabled)
+        self.btn_parse_and_download_all.setEnabled(enabled)
         self.btn_clear.setEnabled(enabled)
 
     def clear_completed(self):
