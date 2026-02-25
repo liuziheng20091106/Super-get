@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QTextEdit, QGroupBox, QDialog, QListWidget, QListWidgetItem,
     QMessageBox, QAbstractItemView, QTabWidget, QProgressBar,
     QStatusBar, QMenuBar, QMenu, QFileDialog, QFrame, QSplitter,
-    QScrollArea, QCheckBox, QComboBox, QSpinBox, QFormLayout
+    QScrollArea, QCheckBox, QComboBox, QSpinBox, QFormLayout, QDoubleSpinBox
 )
 from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, pyqtSignal, QThread, QTimer, QUrl, QItemSelectionModel, QPoint
 from PyQt6.QtGui import QAction, QFont, QPalette, QIcon, QPixmap, QDesktopServices
@@ -24,6 +24,7 @@ import re
 
 class NaturalSortProxyModel(QSortFilterProxyModel):
     def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:
+        logger.debug(f"[NaturalSortProxyModel] lessThan called")
         if not left.isValid() or not right.isValid():
             return super().lessThan(left, right)
 
@@ -36,6 +37,7 @@ class NaturalSortProxyModel(QSortFilterProxyModel):
         return self._natural_compare(str(left_data), str(right_data))
 
     def _natural_compare(self, s1: str, s2: str) -> bool:
+        logger.debug(f"[NaturalSortProxyModel] _natural_compare called with s1={s1[:20]}..., s2={s2[:20]}...")
         pattern = re.compile(r'(\d+)|(\D+)')
 
         parts1 = pattern.findall(s1)
@@ -78,6 +80,7 @@ from config import Config
 
 
 def warmup_requests():
+    logger.debug(f"[main_window] warmup_requests called")
     urls = [
         "https://i275.com/play/29690/16921470.html",
         "https://m.i275.com/play/29690/16921470.html",
@@ -100,10 +103,12 @@ class SearchThread(QThread):
     error = pyqtSignal(str)
 
     def __init__(self, keyword):
+        logger.debug(f"[SearchThread] __init__ called with keyword={keyword}")
         super().__init__()
         self.keyword = keyword
 
     def run(self):
+        logger.debug(f"[SearchThread] run called")
         try:
             client = SearchClient()
             results = client.search(self.keyword)
@@ -118,6 +123,7 @@ class ParseThread(QThread):
     error = pyqtSignal(str)
 
     def __init__(self, urls, list_ids, manager):
+        logger.debug(f"[ParseThread] __init__ called with {len(urls)} urls")
         super().__init__()
         self.urls = urls
         self.list_ids = list_ids
@@ -125,9 +131,11 @@ class ParseThread(QThread):
         self._stop_flag = False
 
     def stop(self):
+        logger.debug(f"[ParseThread] stop called")
         self._stop_flag = True
 
     def run(self):
+        logger.debug(f"[ParseThread] run called")
         try:
             scraper = AudioScraper()
             scraper.init_session()
@@ -158,10 +166,12 @@ class FetchChapterListThread(QThread):
     error = pyqtSignal(str)
 
     def __init__(self, album_id: int):
+        logger.debug(f"[FetchChapterListThread] __init__ called with album_id={album_id}")
         super().__init__()
         self.album_id = album_id
 
     def run(self):
+        logger.debug(f"[FetchChapterListThread] run called with album_id={self.album_id}")
         try:
             from book_scraper import download_book_page
             from extractor import LinkExtractor
@@ -190,6 +200,7 @@ class ParseAlbumThread(QThread):
     saved = pyqtSignal()
 
     def __init__(self, album_id: int, album_name: str, album_artist: str, manager, resume_list_ids: list = None):
+        logger.debug(f"[ParseAlbumThread] __init__ called with album_id={album_id}, album_name={album_name}")
         super().__init__()
         self.album_id = album_id
         self.album_name = album_name
@@ -199,9 +210,11 @@ class ParseAlbumThread(QThread):
         self._stop_flag = False
 
     def stop(self):
+        logger.debug(f"[ParseAlbumThread] stop called")
         self._stop_flag = True
 
     def run(self):
+        logger.debug(f"[ParseAlbumThread] run called")
         try:
             from book_scraper import download_book_page
             from extractor import LinkExtractor
@@ -302,20 +315,24 @@ class ParseAlbumThread(QThread):
 
 class DownloadThread(QThread):
     progress = pyqtSignal(int, int, str, str)
-    finished = pyqtSignal(int, int)
+    finished = pyqtSignal(int, int, list)
     error = pyqtSignal(str)
 
-    def __init__(self, audio_infos, download_dir, config):
+    def __init__(self, audio_infos, download_dir, config, list_ids=None):
+        logger.debug(f"[DownloadThread] __init__ called with {len(audio_infos)} items")
         super().__init__()
         self.audio_infos = audio_infos
         self.download_dir = download_dir
         self.config = config
+        self.list_ids = list_ids or []
         self._stop_flag = False
 
     def stop(self):
+        logger.debug(f"[DownloadThread] stop called")
         self._stop_flag = True
 
     def run(self):
+        logger.debug(f"[DownloadThread] run called")
         try:
             downloader = AudioDownloader(
                 max_workers=self.config.MAX_WORKERS,
@@ -323,46 +340,61 @@ class DownloadThread(QThread):
                 download_dir=self.download_dir
             )
             
-            success_count = 0
-            total = len(self.audio_infos)
-            
-            for i, info in enumerate(self.audio_infos):
-                if self._stop_flag:
-                    break
+            audio_info_objects = []
+            for info in self.audio_infos:
                 audio_info = AudioInfo(
                     name=info.get('name', '未知'),
                     artist=info.get('artist', '未知'),
                     url=info.get('url', ''),
-                    album=info.get('album_name', '')
+                    album=info.get('album_name', ''),
+                    list_id=info.get('list_id', 0) if isinstance(info, dict) else 0
                 )
                 audio_info.generate_file_path(self.download_dir)
-                
-                self.progress.emit(i + 1, total, audio_info.name, "downloading")
-                
-                if downloader.download_single(audio_info):
-                    success_count += 1
-                    self.progress.emit(i + 1, total, audio_info.name, "success")
-                else:
-                    self.progress.emit(i + 1, total, audio_info.name, "failed")
+                audio_info_objects.append(audio_info)
             
-            self.finished.emit(success_count, total)
+            total = len(audio_info_objects)
+            completed_count = 0
+            expired_list_ids = []
+            
+            def progress_callback(status: str, name: str):
+                nonlocal completed_count
+                completed_count += 1
+                self.progress.emit(completed_count, total, name, status)
+            
+            downloader.download_with_callback(audio_info_objects, progress_callback)
+            
+            logger.debug(f"Download finished, checking expired items:")
+            for audio_info in audio_info_objects:
+                logger.debug(f"  - {audio_info.name}: status={audio_info.download_status}, list_id={audio_info.list_id}")
+                if audio_info.download_status == "expired" and audio_info.list_id:
+                    expired_list_ids.append(audio_info.list_id)
+                    logger.debug(f"  Added expired list_id: {audio_info.list_id}")
+            
+            success_count = sum(1 for a in audio_info_objects if a.download_status == "success")
+            logger.debug(f"Final: success={success_count}, expired_count={len(expired_list_ids)}")
+            self.finished.emit(success_count, total, expired_list_ids)
         except Exception as e:
+            logger.error(f"DownloadThread error: {e}")
             self.error.emit(str(e))
 
 
 class BookTaskTableModel(QAbstractTableModel):
     def __init__(self, parent=None):
+        logger.debug(f"[BookTaskTableModel] __init__ called")
         super().__init__(parent)
         self.tasks = []
         self.headers = ['序号', '名称', '解析状态', '下载状态', '添加时间']
 
     def rowCount(self, parent=QModelIndex()):
+        #logger.debug(f"[BookTaskTableModel] rowCount called")
         return len(self.tasks)
 
     def columnCount(self, parent=QModelIndex()):
+        #logger.debug(f"[BookTaskTableModel] columnCount called")
         return len(self.headers)
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        #logger.debug(f"[BookTaskTableModel] headerData called with section={section}")
         if role == Qt.ItemDataRole.DisplayRole:
             if 0 <= section < len(self.headers):
                 return self.headers[section]
@@ -370,6 +402,7 @@ class BookTaskTableModel(QAbstractTableModel):
         return None
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        #logger.debug(f"[BookTaskTableModel] data called with row={index.row()}, col={index.column()}")
         if not index.isValid():
             return None
 
@@ -398,6 +431,7 @@ class BookTaskTableModel(QAbstractTableModel):
         return None
 
     def _build_tooltip(self, task: BookTask) -> str:
+        logger.debug(f"[BookTaskTableModel] _build_tooltip called")
         return (f"专辑名: {task.album_name}\n"
                 f"专辑ID: {task.album_id}\n"
                 f"艺术家: {task.album_artist}\n"
@@ -406,16 +440,19 @@ class BookTaskTableModel(QAbstractTableModel):
                 f"下载: {'是' if task.is_downloaded else '否'}")
 
     def get_task(self, row: int) -> BookTask:
+        logger.debug(f"[BookTaskTableModel] get_task called with row={row}")
         if 0 <= row < len(self.tasks):
             return self.tasks[row]
         return None
 
     def set_tasks(self, tasks: list):
+        logger.debug(f"[BookTaskTableModel] set_tasks called with {len(tasks)} tasks")
         self.beginResetModel()
         self.tasks = tasks
         self.endResetModel()
 
     def update_task(self, row: int, name: str = None, url: str = None):
+        logger.debug(f"[BookTaskTableModel] update_task called with row={row}")
         if 0 <= row < len(self.tasks):
             task = self.tasks[row]
             if name is not None:
@@ -425,12 +462,14 @@ class BookTaskTableModel(QAbstractTableModel):
             self.dataChanged.emit(self.index(row, 0), self.index(row, self.columnCount() - 1))
 
     def add_tasks(self, tasks: list):
+        logger.debug(f"[BookTaskTableModel] add_tasks called with {len(tasks)} tasks")
         start = len(self.tasks)
         self.beginInsertRows(QModelIndex(), start, start + len(tasks) - 1)
         self.tasks.extend(tasks)
         self.endInsertRows()
 
     def remove_task(self, row: int):
+        logger.debug(f"[BookTaskTableModel] remove_task called with row={row}")
         if 0 <= row < len(self.tasks):
             self.beginRemoveRows(QModelIndex(), row, row)
             del self.tasks[row]
@@ -440,13 +479,18 @@ class BookTaskTableModel(QAbstractTableModel):
 class AlbumListWidget(QWidget):
     album_selected = pyqtSignal(int)
     album_edit_requested = pyqtSignal(int)
+    album_parse_requested = pyqtSignal(int)
+    album_download_requested = pyqtSignal(int)
+    album_delete_requested = pyqtSignal(int)
 
     def __init__(self, parent=None):
+        logger.debug(f"[AlbumListWidget] __init__ called")
         super().__init__(parent)
         self.albums = {}
         self.init_ui()
 
     def init_ui(self):
+        logger.debug(f"[AlbumListWidget] init_ui called")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -468,20 +512,34 @@ class AlbumListWidget(QWidget):
         layout.addWidget(self.album_list, 1)
 
     def show_context_menu(self, pos):
+        logger.debug(f"[AlbumListWidget] show_context_menu called")
         item = self.album_list.itemAt(pos)
         if not item:
             return
-        
+
         album_id = item.data(Qt.ItemDataRole.UserRole)
         menu = QMenu(self)
-        
+
+        parse_action = menu.addAction("解析本专辑")
+        download_action = menu.addAction("下载本专辑")
+        menu.addSeparator()
+        delete_action = menu.addAction("删除本专辑")
+        menu.addSeparator()
         edit_action = menu.addAction("编辑元数据")
+
         action = menu.exec(self.album_list.mapToGlobal(QPoint(pos.x(), pos.y())))
-        
-        if action == edit_action:
+
+        if action == parse_action:
+            self.album_parse_requested.emit(album_id)
+        elif action == download_action:
+            self.album_download_requested.emit(album_id)
+        elif action == delete_action:
+            self.album_delete_requested.emit(album_id)
+        elif action == edit_action:
             self.album_edit_requested.emit(album_id)
 
     def set_albums(self, albums: dict):
+        logger.debug(f"[AlbumListWidget] set_albums called with {len(albums)} albums")
         self.albums = albums
         self.album_list.clear()
         for album_id, info in albums.items():
@@ -492,24 +550,29 @@ class AlbumListWidget(QWidget):
             self.album_list.addItem(item)
 
     def on_item_clicked(self, item):
+        logger.debug(f"[AlbumListWidget] on_item_clicked called")
         album_id = item.data(Qt.ItemDataRole.UserRole)
         self.album_selected.emit(album_id)
 
     def add_album(self, album_id: int, name: str, artist: str, task_count: int = 0):
+        logger.debug(f"[AlbumListWidget] add_album called with album_id={album_id}")
         self.albums[album_id] = {'name': name, 'artist': artist, 'task_count': task_count}
         self.set_albums(self.albums)
 
     def update_album(self, album_id: int, task_count: int):
+        logger.debug(f"[AlbumListWidget] update_album called with album_id={album_id}")
         if album_id in self.albums:
             self.albums[album_id]['task_count'] = task_count
             self.set_albums(self.albums)
 
     def remove_album(self, album_id: int):
+        logger.debug(f"[AlbumListWidget] remove_album called with album_id={album_id}")
         if album_id in self.albums:
             del self.albums[album_id]
             self.set_albums(self.albums)
 
     def update_album_info(self, album_id: int, name: str = None, artist: str = None):
+        logger.debug(f"[AlbumListWidget] update_album_info called with album_id={album_id}")
         if album_id in self.albums:
             if name is not None:
                 self.albums[album_id]['name'] = name
@@ -520,6 +583,7 @@ class AlbumListWidget(QWidget):
 
 class ResultItemWidget(QWidget):
     def __init__(self, result: SearchResult, parent=None):
+        logger.debug(f"[ResultItemWidget] __init__ called")
         super().__init__(parent)
         self.result = result
         self.init_ui()
@@ -600,11 +664,13 @@ class ResultItemWidget(QWidget):
 
 class SearchResultDialog(QDialog):
     def __init__(self, parent=None):
+        logger.debug(f"[SearchResultDialog] __init__ called")
         super().__init__(parent)
         self.selected_book = None
         self.init_ui()
 
     def init_ui(self):
+        logger.debug(f"[SearchResultDialog] init_ui called")
         self.setWindowTitle("搜索有声小说")
         self.setMinimumSize(600, 500)
 
@@ -658,6 +724,7 @@ class SearchResultDialog(QDialog):
         main_layout.addWidget(self.status_label)
 
     def do_search(self):
+        logger.debug(f"[SearchResultDialog] do_search called")
         keyword = self.search_input.text().strip()
         if not keyword:
             self.status_label.setText("请输入搜索关键词")
@@ -674,6 +741,7 @@ class SearchResultDialog(QDialog):
         self.search_thread.start()
 
     def on_search_finished(self, results):
+        logger.debug(f"[SearchResultDialog] on_search_finished called with {len(results)} results")
         self.search_btn.setEnabled(True)
         self.status_label.setText("")
 
@@ -695,13 +763,15 @@ class SearchResultDialog(QDialog):
             self.result_list.setItemWidget(item, widget)
 
     def on_search_error(self, error_msg):
+        logger.debug(f"[SearchResultDialog] on_search_error called with error: {error_msg}")
         self.search_btn.setEnabled(True)
         self.status_label.setText(f"搜索失败: {error_msg}")
 
     def on_item_clicked(self, item):
-        pass
+        logger.debug(f"[SearchResultDialog] on_item_clicked called")
 
     def on_item_double_clicked(self, item):
+        logger.debug(f"[SearchResultDialog] on_item_double_clicked called")
         result = item.data(Qt.ItemDataRole.UserRole)
         if result:
             self.selected_book_id = result.book_id
@@ -709,17 +779,20 @@ class SearchResultDialog(QDialog):
             self.accept()
 
     def get_selected_book(self):
+        logger.debug(f"[SearchResultDialog] get_selected_book called")
         return self.selected_book
 
 
 class EditAlbumDialog(QDialog):
     def __init__(self, album_name: str, album_artist: str, parent=None):
+        logger.debug(f"[EditAlbumDialog] __init__ called")
         super().__init__(parent)
         self.album_name = album_name
         self.album_artist = album_artist
         self.init_ui()
 
     def init_ui(self):
+        logger.debug(f"[EditAlbumDialog] init_ui called")
         self.setWindowTitle("编辑专辑元数据")
         self.setMinimumSize(400, 200)
 
@@ -763,6 +836,7 @@ class EditAlbumDialog(QDialog):
         layout.addLayout(button_layout)
 
     def on_ok_clicked(self):
+        logger.debug(f"[EditAlbumDialog] on_ok_clicked called")
         new_name = self.album_name_input.text().strip()
         new_artist = self.album_artist_input.text().strip()
         
@@ -775,17 +849,20 @@ class EditAlbumDialog(QDialog):
         self.accept()
 
     def get_values(self):
+        logger.debug(f"[EditAlbumDialog] get_values called")
         return self.new_name, self.new_artist
 
 
 class EditTaskDialog(QDialog):
     def __init__(self, task_name: str, task_url: str, parent=None):
+        logger.debug(f"[EditTaskDialog] __init__ called")
         super().__init__(parent)
         self.task_name = task_name
         self.task_url = task_url
         self.init_ui()
 
     def init_ui(self):
+        logger.debug(f"[EditTaskDialog] init_ui called")
         self.setWindowTitle("编辑单集元数据")
         self.setMinimumSize(450, 180)
 
@@ -829,6 +906,7 @@ class EditTaskDialog(QDialog):
         layout.addLayout(button_layout)
 
     def on_ok_clicked(self):
+        logger.debug(f"[EditTaskDialog] on_ok_clicked called")
         new_name = self.task_name_input.text().strip()
         new_url = self.task_url_input.text().strip()
         
@@ -841,11 +919,164 @@ class EditTaskDialog(QDialog):
         self.accept()
 
     def get_values(self):
+        logger.debug(f"[EditTaskDialog] get_values called")
         return self.new_name, self.new_url
+
+
+class ConfigDialog(QDialog):
+    def __init__(self, parent=None):
+        logger.debug(f"[ConfigDialog] __init__ called")
+        super().__init__(parent)
+        self.config = Config()
+        self.init_ui()
+        self.load_config()
+
+    def init_ui(self):
+        logger.debug(f"[ConfigDialog] init_ui called")
+        self.setWindowTitle("配置设置")
+        self.setMinimumSize(500, 550)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+
+        title_label = QLabel("配置设置")
+        title_label.setStyleSheet("font-size: 18px; font-weight: bold;")
+        layout.addWidget(title_label)
+
+        form_layout = QFormLayout()
+        form_layout.setSpacing(12)
+
+        self.base_url_input = QLineEdit()
+        self.base_url_input.setPlaceholderText("例如: https://i275.com")
+        form_layout.addRow("基础URL:", self.base_url_input)
+
+        self.play_url_template_input = QLineEdit()
+        self.play_url_template_input.setPlaceholderText("例如: https://i275.com/play/{}.html")
+        form_layout.addRow("播放URL模板:", self.play_url_template_input)
+
+        self.cookie_input = QLineEdit()
+        self.cookie_input.setPlaceholderText("例如: PHPSESSID=xxx")
+        form_layout.addRow("Cookie:", self.cookie_input)
+
+        self.request_interval_input = QDoubleSpinBox()
+        self.request_interval_input.setRange(0.1, 10.0)
+        self.request_interval_input.setSingleStep(0.1)
+        self.request_interval_input.setDecimals(1)
+        form_layout.addRow("请求间隔(秒):", self.request_interval_input)
+
+        self.request_timeout_input = QSpinBox()
+        self.request_timeout_input.setRange(1, 120)
+        self.request_timeout_input.setSingleStep(1)
+        form_layout.addRow("请求超时(秒):", self.request_timeout_input)
+
+        self.max_retries_input = QSpinBox()
+        self.max_retries_input.setRange(1, 10)
+        self.max_retries_input.setSingleStep(1)
+        form_layout.addRow("最大重试次数:", self.max_retries_input)
+
+        self.max_workers_input = QSpinBox()
+        self.max_workers_input.setRange(1, 100)
+        self.max_workers_input.setSingleStep(1)
+        form_layout.addRow("最大并发数:", self.max_workers_input)
+
+        self.download_timeout_input = QSpinBox()
+        self.download_timeout_input.setRange(10, 600)
+        self.download_timeout_input.setSingleStep(10)
+        form_layout.addRow("下载超时(秒):", self.download_timeout_input)
+
+        self.default_download_dir_input = QLineEdit()
+        self.default_download_dir_input.setPlaceholderText("例如: downloads")
+        form_layout.addRow("默认下载目录:", self.default_download_dir_input)
+
+        self.debug_checkbox = QCheckBox("开启调试模式")
+        form_layout.addRow("", self.debug_checkbox)
+
+        layout.addLayout(form_layout)
+        layout.addStretch()
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        self.reset_btn = QPushButton("恢复默认")
+        self.reset_btn.setFixedSize(100, 35)
+        self.reset_btn.clicked.connect(self.reset_to_default)
+
+        self.cancel_btn = QPushButton("取消")
+        self.cancel_btn.setFixedSize(80, 35)
+        self.cancel_btn.clicked.connect(self.reject)
+
+        self.ok_btn = QPushButton("保存")
+        self.ok_btn.setFixedSize(80, 35)
+        self.ok_btn.clicked.connect(self.save_config)
+
+        button_layout.addWidget(self.reset_btn)
+        button_layout.addWidget(self.cancel_btn)
+        button_layout.addWidget(self.ok_btn)
+
+        layout.addLayout(button_layout)
+
+    def load_config(self):
+        logger.debug(f"[ConfigDialog] load_config called")
+        all_config = self.config.get_all_config()
+
+        self.base_url_input.setText(all_config.get("base_url", ""))
+        self.play_url_template_input.setText(all_config.get("play_url_template", ""))
+        self.cookie_input.setText(all_config.get("cookie", ""))
+        self.request_interval_input.setValue(all_config.get("request_interval", 0.1))
+        self.request_timeout_input.setValue(all_config.get("request_timeout", 10))
+        self.max_retries_input.setValue(all_config.get("max_retries", 3))
+        self.max_workers_input.setValue(all_config.get("max_workers", 32))
+        self.download_timeout_input.setValue(all_config.get("download_timeout", 60))
+        self.default_download_dir_input.setText(all_config.get("default_download_dir", "downloads"))
+        self.debug_checkbox.setChecked(all_config.get("debug", False))
+
+    def reset_to_default(self):
+        logger.debug(f"[ConfigDialog] reset_to_default called")
+        from config import get_default_config
+        default_config = get_default_config()
+
+        self.base_url_input.setText(default_config.get("base_url", ""))
+        self.play_url_template_input.setText(default_config.get("play_url_template", ""))
+        self.cookie_input.setText(default_config.get("cookie", ""))
+        self.request_interval_input.setValue(default_config.get("request_interval", 0.1))
+        self.request_timeout_input.setValue(default_config.get("request_timeout", 10))
+        self.max_retries_input.setValue(default_config.get("max_retries", 3))
+        self.max_workers_input.setValue(default_config.get("max_workers", 32))
+        self.download_timeout_input.setValue(default_config.get("download_timeout", 60))
+        self.default_download_dir_input.setText(default_config.get("default_download_dir", "downloads"))
+        self.debug_checkbox.setChecked(default_config.get("debug", False))
+
+    def save_config(self):
+        logger.debug(f"[ConfigDialog] save_config called")
+
+        base_url = self.base_url_input.text().strip()
+        if not base_url:
+            QMessageBox.warning(self, "警告", "基础URL不能为空")
+            return
+
+        updates = {
+            "base_url": base_url,
+            "play_url_template": self.play_url_template_input.text().strip(),
+            "cookie": self.cookie_input.text().strip(),
+            "request_interval": self.request_interval_input.value(),
+            "request_timeout": self.request_timeout_input.value(),
+            "max_retries": self.max_retries_input.value(),
+            "max_workers": self.max_workers_input.value(),
+            "download_timeout": self.download_timeout_input.value(),
+            "default_download_dir": self.default_download_dir_input.text().strip(),
+            "debug": self.debug_checkbox.isChecked()
+        }
+
+        self.config.update_multiple(updates)
+        Config.reload()
+
+        QMessageBox.information(self, "成功", "配置已保存")
+        self.accept()
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
+        logger.debug(f"[MainWindow] __init__ called")
         super().__init__()
         self.manager = BookTaskManager()
         self.config = Config()
@@ -860,6 +1091,7 @@ class MainWindow(QMainWindow):
         self.load_data()
 
     def init_ui(self):
+        logger.debug(f"[MainWindow] init_ui called")
         self.setWindowTitle("有声小说下载管理器")
         self.setGeometry(100, 100, 1500, 800)
         self.setMinimumSize(1000, 700)
@@ -880,6 +1112,9 @@ class MainWindow(QMainWindow):
         self.album_list_widget.setFixedWidth(220)
         self.album_list_widget.album_selected.connect(self.on_album_selected)
         self.album_list_widget.album_edit_requested.connect(self.on_album_edit_requested)
+        self.album_list_widget.album_parse_requested.connect(self.on_album_parse_requested)
+        self.album_list_widget.album_download_requested.connect(self.on_album_download_requested)
+        self.album_list_widget.album_delete_requested.connect(self.on_album_delete_requested)
         main_layout.addWidget(self.album_list_widget)
 
         right_panel = QWidget()
@@ -939,6 +1174,12 @@ class MainWindow(QMainWindow):
         action_download_all.triggered.connect(self.download_all_undownloaded)
         task_menu.addAction(action_download_all)
         
+        task_menu.addSeparator()
+        
+        action_reset_download = QAction("清除下载状态", self)
+        action_reset_download.triggered.connect(self.reset_download_status)
+        task_menu.addAction(action_reset_download)
+        
         help_menu = menubar.addMenu("帮助")
         
         action_open_log_folder = QAction("打开日志文件夹", self)
@@ -954,6 +1195,12 @@ class MainWindow(QMainWindow):
         action_about = QAction("关于", self)
         action_about.triggered.connect(self.show_about)
         help_menu.addAction(action_about)
+
+        settings_menu = menubar.addMenu("设置")
+        
+        action_config = QAction("配置设置", self)
+        action_config.triggered.connect(self.show_config_dialog)
+        settings_menu.addAction(action_config)
 
     def _create_toolbar(self) -> QWidget:
         widget = QWidget()
@@ -1209,22 +1456,111 @@ class MainWindow(QMainWindow):
             else:
                 QMessageBox.warning(self, "错误", "更新专辑元数据失败")
 
+    def on_album_parse_requested(self, album_id: int):
+        tasks = self.manager.get_tasks_by_album(album_id)
+        if not tasks:
+            QMessageBox.warning(self, "警告", "未找到该专辑")
+            return
+
+        parsed = [t for t in tasks if t.is_parsed]
+        unparsed = [t for t in tasks if not t.is_parsed]
+
+        if not unparsed and not parsed:
+            QMessageBox.information(self, "提示", "没有可解析的任务")
+            return
+
+        if parsed and unparsed:
+            reply = QMessageBox.question(
+                self, "确认",
+                f"该专辑有 {len(parsed)} 个任务已解析，是否重新解析？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._start_parse([t.url for t in tasks], [t.list_id for t in tasks])
+            else:
+                self._start_parse([t.url for t in unparsed], [t.list_id for t in unparsed])
+        elif parsed:
+            reply = QMessageBox.question(
+                self, "确认",
+                f"该专辑的 {len(parsed)} 个任务都已解析，是否重新解析？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._start_parse([t.url for t in parsed], [t.list_id for t in parsed])
+        else:
+            self._start_parse([t.url for t in unparsed], [t.list_id for t in unparsed])
+
+    def on_album_download_requested(self, album_id: int):
+        tasks = self.manager.get_tasks_by_album(album_id)
+        if not tasks:
+            QMessageBox.warning(self, "警告", "未找到该专辑")
+            return
+
+        parsed = [t for t in tasks if t.is_parsed]
+        if not parsed:
+            QMessageBox.information(self, "提示", "该专辑的任务都未解析，请先解析")
+            return
+
+        self._start_download(parsed)
+
+    def on_album_delete_requested(self, album_id: int):
+        tasks = self.manager.get_tasks_by_album(album_id)
+        if not tasks:
+            QMessageBox.warning(self, "警告", "未找到该专辑")
+            return
+
+        reply = QMessageBox.question(
+            self, "确认",
+            f"确定要删除该专辑的所有 {len(tasks)} 个任务吗?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            for task in tasks:
+                self.manager.remove_task(task.list_id)
+            self.manager.save()
+            self.album_list_widget.remove_album(album_id)
+            self.current_album_id = None
+            self.refresh_display()
+
     def show_task_context_menu(self, pos):
         index = self.table_view.indexAt(pos)
         if not index.isValid():
             return
-        
+
         source_row = self.proxy_model.mapToSource(index).row()
         task = self.model.get_task(source_row)
         if not task:
             return
-        
+
         menu = QMenu(self)
-        
+
+        parse_action = menu.addAction("解析本集" if not task.is_parsed else "重新解析")
+        if task.is_parsed and not task.is_downloaded:
+            download_action = menu.addAction("下载本集")
+        menu.addSeparator()
+        delete_action = menu.addAction("删除本集")
+        menu.addSeparator()
         edit_action = menu.addAction("编辑元数据")
+
         action = menu.exec(self.table_view.viewport().mapToGlobal(QPoint(pos.x(), pos.y())))
-        
-        if action == edit_action:
+
+        if action == parse_action:
+            if task.is_parsed:
+                reply = QMessageBox.question(
+                    self, "确认",
+                    "该任务已解析，是否重新解析？",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    self._start_parse([task.url], [task.list_id])
+            else:
+                self._start_parse([task.url], [task.list_id])
+        elif task.is_parsed and not task.is_downloaded and action == download_action:
+            self._start_download([task])
+        elif action == delete_action:
+            self.on_task_delete_requested(source_row)
+        elif action == edit_action:
             self.on_task_edit_requested(source_row)
 
     def on_task_edit_requested(self, row: int):
@@ -1232,15 +1568,33 @@ class MainWindow(QMainWindow):
         if not task:
             QMessageBox.warning(self, "警告", "未找到该任务")
             return
-        
+
         dialog = EditTaskDialog(task.name, task.url, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             new_name, new_url = dialog.get_values()
-            
+
             if self.manager.update_task_metadata(task.list_id, new_name, new_url):
                 self.model.update_task(row, new_name, new_url)
             else:
                 QMessageBox.warning(self, "错误", "更新单集元数据失败")
+
+    def on_task_delete_requested(self, row: int):
+        task = self.model.get_task(row)
+        if not task:
+            QMessageBox.warning(self, "警告", "未找到该任务")
+            return
+
+        reply = QMessageBox.question(
+            self, "确认",
+            "确定要删除该任务吗?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.manager.remove_task(task.list_id)
+            self.manager.save()
+            self._refresh_album_list()
+            self.refresh_display()
 
     def show_search_dialog(self):
         dialog = SearchResultDialog(self)
@@ -1506,25 +1860,68 @@ class MainWindow(QMainWindow):
         if not selected:
             QMessageBox.information(self, "提示", "请先选择要解析的任务")
             return
-        
+
+        parsed = [t for t in selected if t.is_parsed]
         unparsed = [t for t in selected if not t.is_parsed]
-        if not unparsed:
-            QMessageBox.information(self, "提示", "选中的任务都已解析")
+
+        if not unparsed and not parsed:
+            QMessageBox.information(self, "提示", "没有可解析的任务")
             return
-        
-        self._start_parse([t.url for t in unparsed], [t.list_id for t in unparsed])
+
+        if parsed and unparsed:
+            reply = QMessageBox.question(
+                self, "确认",
+                f"选中有 {len(parsed)} 个任务已解析，是否重新解析？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._start_parse([t.url for t in selected], [t.list_id for t in selected])
+            else:
+                self._start_parse([t.url for t in unparsed], [t.list_id for t in unparsed])
+        elif parsed:
+            reply = QMessageBox.question(
+                self, "确认",
+                f"选中的 {len(parsed)} 个任务都已解析，是否重新解析？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._start_parse([t.url for t in parsed], [t.list_id for t in parsed])
+        else:
+            self._start_parse([t.url for t in unparsed], [t.list_id for t in unparsed])
 
     def parse_all_unparsed(self):
         if self.current_album_id is not None:
-            unparsed = [t for t in self.manager.get_tasks_by_album(self.current_album_id) if not t.is_parsed]
+            all_tasks = self.manager.get_tasks_by_album(self.current_album_id)
         else:
-            unparsed = self.manager.get_unparsed_books()
-        
-        if not unparsed:
-            QMessageBox.information(self, "提示", "没有未解析的任务")
+            all_tasks = list(self.manager.tasks.values())
+
+        parsed = [t for t in all_tasks if t.is_parsed]
+        unparsed = [t for t in all_tasks if not t.is_parsed]
+
+        if not unparsed and not parsed:
+            QMessageBox.information(self, "提示", "没有可解析的任务")
             return
-        
-        self._start_parse([t.url for t in unparsed], [t.list_id for t in unparsed])
+
+        if parsed and unparsed:
+            reply = QMessageBox.question(
+                self, "确认",
+                f"有 {len(parsed)} 个任务已解析，是否重新解析全部？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._start_parse([t.url for t in all_tasks], [t.list_id for t in all_tasks])
+            else:
+                self._start_parse([t.url for t in unparsed], [t.list_id for t in unparsed])
+        elif parsed:
+            reply = QMessageBox.question(
+                self, "确认",
+                f"所有 {len(parsed)} 个任务都已解析，是否重新解析？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._start_parse([t.url for t in parsed], [t.list_id for t in parsed])
+        else:
+            self._start_parse([t.url for t in unparsed], [t.list_id for t in unparsed])
 
     def select_all_unparsed(self):
         if self.current_album_id is not None:
@@ -1693,21 +2090,32 @@ class MainWindow(QMainWindow):
         self.progress_bar.setFormat(f"{current}/{total}")
         self.status_label.setText(f"正在下载: {name[:30]}...")
 
-    def on_download_finished(self, success_count: int, total: int):
+    def on_download_finished(self, success_count: int, total: int, expired_list_ids: list = None):
         self._set_buttons_enabled(True)
         self.btn_stop.setEnabled(False)
         self.progress_bar.setVisible(False)
         
+        expired_list_ids = expired_list_ids or []
+        
         for list_id in self.download_list_ids:
             self.manager.update_downloaded_status(list_id, True)
+        
+        for list_id in expired_list_ids:
+            self.manager.reset_parsed_status(list_id)
         
         self.manager.save()
         self.refresh_display()
         
-        QMessageBox.information(
-            self, "完成",
-            f"下载完成: {success_count}/{total} 成功"
-        )
+        if expired_list_ids:
+            QMessageBox.information(
+                self, "完成",
+                f"下载完成: {success_count}/{total} 成功\n\n有 {len(expired_list_ids)} 个链接已过期，需要重新解析"
+            )
+        else:
+            QMessageBox.information(
+                self, "完成",
+                f"下载完成: {success_count}/{total} 成功"
+            )
 
     def on_download_error(self, error: str):
         logger.error(f"下载失败: {error}", exc_info=True)
@@ -1749,6 +2157,28 @@ class MainWindow(QMainWindow):
             self.manager.save()
             self._refresh_album_list()
             self.refresh_display()
+
+    def reset_download_status(self):
+        if self.current_album_id is not None:
+            downloaded_tasks = [t for t in self.manager.get_tasks_by_album(self.current_album_id) if t.is_downloaded]
+        else:
+            downloaded_tasks = [t for t in self.manager.tasks.values() if t.is_downloaded]
+        
+        if not downloaded_tasks:
+            QMessageBox.information(self, "提示", "没有已下载的任务")
+            return
+        
+        reply = QMessageBox.question(
+            self, "确认",
+            f"确定要清除 {len(downloaded_tasks)} 个任务的下载状态吗?\n\n此操作不会删除已下载的文件，仅将状态重置为未下载。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            reset_count = self.manager.reset_all_download_status()
+            self.manager.save()
+            self.refresh_display()
+            QMessageBox.information(self, "完成", f"已重置 {reset_count} 个任务的下载状态")
 
     def delete_selected(self):
         selected = self.get_selected_tasks()
@@ -1820,6 +2250,11 @@ class MainWindow(QMainWindow):
             "整合搜索、解析、下载功能\n"
             "统一使用PyQt6界面"
         )
+
+    def show_config_dialog(self):
+        logger.debug(f"[MainWindow] show_config_dialog called")
+        dialog = ConfigDialog(self)
+        dialog.exec()
 
     def closeEvent(self, event):
         if getattr(self, 'parse_thread', None) and self.parse_thread.isRunning():

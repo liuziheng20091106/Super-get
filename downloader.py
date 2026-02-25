@@ -27,8 +27,10 @@ class AudioInfo:
     download_status: str = "pending"
     retry_count: int = 0
     error_message: str = ""
+    list_id: int = 0
     
     def generate_file_path(self, base_dir: str = ""):
+        logger.debug(f"[AudioInfo] generate_file_path called for name={self.name}")
         safe_album = self.sanitize_filename(self.album or "未知专辑")
         safe_artist = self.sanitize_filename(self.artist or "未知艺术家")
         safe_name = self.sanitize_filename(self.name or "未知音频")
@@ -45,6 +47,7 @@ class AudioInfo:
     
     @staticmethod
     def sanitize_filename(filename: str) -> str:
+        logger.debug(f"[AudioInfo] sanitize_filename called for {filename}")
         illegal_chars = r'[<>:"/\\|?*\x00-\x1F]'
         safe_name = re.sub(illegal_chars, '_', filename)
         safe_name = re.sub(r'_+', '_', safe_name)
@@ -53,6 +56,7 @@ class AudioInfo:
         return safe_name.strip()
     
     def get_file_extension(self) -> str:
+        logger.debug(f"[AudioInfo] get_file_extension called")
         parsed_url = urlparse(self.url)
         path = parsed_url.path
         
@@ -67,6 +71,7 @@ class AudioInfo:
 class DownloadWorker(threading.Thread):
     def __init__(self, work_queue: queue.Queue, result_queue: queue.Queue, 
                  max_retries: int = 3, timeout: int = 60):
+        logger.debug(f"[DownloadWorker] __init__ called with max_retries={max_retries}, timeout={timeout}")
         super().__init__()
         self.work_queue = work_queue
         self.result_queue = result_queue
@@ -90,9 +95,11 @@ class DownloadWorker(threading.Thread):
         }
     
     def stop(self):
+        logger.debug(f"[DownloadWorker] stop called")
         self._stop_event.set()
     
     def run(self):
+        logger.debug(f"[DownloadWorker] run called")
         while not self._stop_event.is_set():
             try:
                 audio_info = self.work_queue.get(timeout=1)
@@ -101,7 +108,8 @@ class DownloadWorker(threading.Thread):
                 
                 audio_info.download_status = "downloading"
                 success = self.download_with_retry(audio_info)
-                audio_info.download_status = "success" if success else "failed"
+                if audio_info.download_status != "expired":
+                    audio_info.download_status = "success" if success else "failed"
                 
                 self.result_queue.put(audio_info)
                 self.work_queue.task_done()
@@ -117,6 +125,7 @@ class DownloadWorker(threading.Thread):
                 continue
     
     def download_with_retry(self, audio_info: AudioInfo) -> bool:
+        logger.debug(f"[DownloadWorker] download_with_retry called for {audio_info.name}")
         for attempt in range(self.max_retries):
             try:
                 if self.download_file(audio_info):
@@ -134,7 +143,7 @@ class DownloadWorker(threading.Thread):
                 audio_info.error_message = f"尝试 {attempt + 1}/{self.max_retries} 失败: {e}"
                 
                 if attempt < self.max_retries - 1:
-                    wait_time = 2 ** attempt
+                    wait_time = self.config.REQUEST_INTERVAL
                     time.sleep(wait_time)
         
         return False
@@ -144,6 +153,7 @@ class DownloadWorker(threading.Thread):
                        progress_callback=None,
                        stop_check_callback=None,
                        verify_size: bool = True) -> bool:
+        logger.debug(f"[DownloadWorker] _download_core called for {audio_info.name}")
         if os.path.exists(audio_info.file_path):
             file_size = os.path.getsize(audio_info.file_path)
             if file_size > 1024:
@@ -190,6 +200,7 @@ class DownloadWorker(threading.Thread):
         return True
 
     def download_file(self, audio_info: AudioInfo) -> bool:
+        logger.debug(f"[DownloadWorker] download_file called for {audio_info.name}")
         def progress_callback(downloaded: int, total_size: int, name: str):
             percent = (downloaded / total_size) * 100
             short_name = name[:30] + "..." if len(name) > 30 else name
@@ -219,6 +230,7 @@ class DownloadWorker(threading.Thread):
 
 class AudioDownloader:
     def __init__(self, max_workers: int = None, max_retries: int = None, download_dir: str = None):
+        logger.debug(f"[AudioDownloader] __init__ called with max_workers={max_workers}, max_retries={max_retries}, download_dir={download_dir}")
         self.config = Config()
         self.max_workers = max_workers or self.config.MAX_WORKERS
         self.max_retries = max_retries or self.config.MAX_RETRIES
@@ -232,6 +244,7 @@ class AudioDownloader:
         self.progress_lock = threading.Lock()
     
     def load_from_json(self, json_file: str = None) -> List[AudioInfo]:
+        logger.debug(f"[AudioDownloader] load_from_json called with json_file={json_file}")
         json_file = json_file or self.config.JSON_OUTPUT_FILE
         try:
             with open(json_file, 'r', encoding='utf-8') as f:
@@ -274,6 +287,7 @@ class AudioDownloader:
             return []
     
     def prepare_tasks(self, audio_infos: List[AudioInfo]):
+        logger.debug(f"[AudioDownloader] prepare_tasks called with {len(audio_infos)} items")
         self.total_files = len(audio_infos)
         
         for audio_info in audio_infos:
@@ -290,6 +304,7 @@ class AudioDownloader:
             self.work_queue.put(audio_info)
     
     def start_workers(self):
+        logger.debug(f"[AudioDownloader] start_workers called")
         logger.info(f"启动 {self.max_workers} 个工作线程...")
         
         for i in range(self.max_workers):
@@ -303,6 +318,7 @@ class AudioDownloader:
             self.workers.append(worker)
     
     def monitor_progress(self):
+        logger.debug(f"[AudioDownloader] monitor_progress called")
         logger.info(f"开始下载 {self.total_files} 个音频文件...")
         logger.debug("=" * 60)
         
@@ -342,6 +358,7 @@ class AudioDownloader:
         self.print_summary(total_elapsed, final=True)
     
     def print_summary(self, elapsed_time: float, final: bool = False):
+        logger.debug(f"[AudioDownloader] print_summary called with elapsed_time={elapsed_time}, final={final}")
         completed = self.completed_files
         failed = self.failed_files
         total = self.total_files
@@ -356,6 +373,7 @@ class AudioDownloader:
             logger.debug(f"平均每个文件: {avg_time:.1f}秒")
     
     def download(self, json_file: str = None) -> bool:
+        logger.debug(f"[AudioDownloader] download called with json_file={json_file}")
         audio_infos = self.load_from_json(json_file)
         if not audio_infos:
             logger.warning("没有可下载的音频信息")
@@ -381,7 +399,63 @@ class AudioDownloader:
         
         return self.completed_files > 0
     
+    def download_with_callback(self, audio_infos: List[AudioInfo], progress_callback=None) -> bool:
+        logger.debug(f"[AudioDownloader] download_with_callback called with {len(audio_infos)} items")
+        if not audio_infos:
+            logger.warning("没有可下载的音频信息")
+            return False
+        
+        self.completed_files = 0
+        self.failed_files = 0
+        
+        self.prepare_tasks(audio_infos)
+        
+        if progress_callback:
+            progress_callback("started", "")
+        
+        self.start_workers()
+        
+        start_time = time.time()
+        while self.completed_files + self.failed_files < self.total_files:
+            try:
+                audio_info = self.result_queue.get(timeout=1)
+                
+                with self.progress_lock:
+                    if audio_info.download_status == "success":
+                        self.completed_files += 1
+                        status = "✓ 成功"
+                    elif audio_info.download_status == "expired":
+                        self.failed_files += 1
+                        status = "⚠ 链接过期"
+                    else:
+                        self.failed_files += 1
+                        status = f"✗ 失败"
+                    
+                    if progress_callback:
+                        if audio_info.download_status == "success":
+                            progress_callback("success", audio_info.name)
+                        elif audio_info.download_status == "expired":
+                            progress_callback("expired", audio_info.name)
+                        else:
+                            progress_callback("failed", audio_info.name)
+                    
+                    logger.info(f"{status}: {audio_info.name}")
+                
+                self.result_queue.task_done()
+                
+            except queue.Empty:
+                continue
+        
+        for worker in self.workers:
+            worker.stop()
+        
+        for worker in self.workers:
+            worker.join(timeout=2)
+        
+        return self.completed_files > 0
+    
     def save_results(self, audio_infos: List[AudioInfo]):
+        logger.debug(f"[AudioDownloader] save_results called with {len(audio_infos)} items")
         results_file = os.path.join(self.download_dir, "download_results.txt")
         
         try:
@@ -390,7 +464,12 @@ class AudioDownloader:
                 f.write("=" * 60 + "\n")
                 
                 for audio_info in audio_infos:
-                    status = "成功" if audio_info.download_status == "success" else "失败"
+                    if audio_info.download_status == "success":
+                        status = "成功"
+                    elif audio_info.download_status == "expired":
+                        status = "链接过期"
+                    else:
+                        status = "失败"
                     f.write(f"名称: {audio_info.name}\n")
                     f.write(f"艺术家: {audio_info.artist}\n")
                     f.write(f"状态: {status}\n")
@@ -409,6 +488,7 @@ class AudioDownloader:
     def _download_core_static(audio_info: AudioInfo, timeout: int,
                               headers: Dict, opener,
                               verify_size: bool = False) -> bool:
+        logger.debug(f"[AudioDownloader] _download_core_static called for {audio_info.name}")
         if os.path.exists(audio_info.file_path):
             file_size = os.path.getsize(audio_info.file_path)
             if file_size > 1024:
@@ -458,29 +538,3 @@ class AudioDownloader:
                     pass
             audio_info.error_message = str(e)
             return False
-
-    def download_single(self, audio_info: AudioInfo) -> bool:
-        logger.info(f"开始下载 - 链接: {audio_info.url}")
-        logger.info(f"下载路径: {audio_info.file_path}")
-
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
-
-        opener = build_opener()
-
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': '*/*',
-            'Accept-Language': 'zh-CN,zh;q=0.9',
-        }
-
-        timeout = self.config.DOWNLOAD_TIMEOUT
-
-        return self._download_core_static(
-            audio_info=audio_info,
-            timeout=timeout,
-            headers=headers,
-            opener=opener,
-            verify_size=False
-        )

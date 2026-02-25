@@ -21,9 +21,7 @@ def get_default_config():
         "max_workers": 32,
         "download_timeout": 60,
         "default_download_dir": "downloads",
-        "json_output_file": "audio_infos.json",
-        "input_file": "input.txt",
-        "output_file": "output.txt"
+        "debug": False
     }
 
 def save_config(config):
@@ -98,6 +96,10 @@ class Config:
     @property
     def OUTPUT_FILE(self):
         return self._get_config().get("output_file", "output.txt")
+
+    @property
+    def DEBUG(self):
+        return self._get_config().get("debug", False)
     
     @classmethod
     def get_headers(cls):

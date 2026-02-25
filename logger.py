@@ -2,13 +2,20 @@ import os
 import logging
 import traceback
 from datetime import datetime
+from config import Config
 
 
 LOG_DIR = "log"
 CRASH_DIR = "log"
-LOG_LEVEL = logging.DEBUG
 LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
+
+
+def _get_log_level():
+    """根据配置获取日志级别"""
+    if Config.DEBUG:
+        return logging.DEBUG
+    return logging.INFO
 
 
 def _get_log_file_path():
@@ -20,7 +27,8 @@ def _get_log_file_path():
 
 def setup_logger(name=None):
     logger = logging.getLogger(name)
-    logger.setLevel(LOG_LEVEL)
+    log_level = _get_log_level()
+    logger.setLevel(log_level)
 
     if logger.handlers:
         return logger
@@ -28,15 +36,10 @@ def setup_logger(name=None):
     formatter = logging.Formatter(LOG_FORMAT, DATE_FORMAT)
 
     file_handler = logging.FileHandler(_get_log_file_path(), encoding='utf-8')
-    file_handler.setLevel(LOG_LEVEL)
+    file_handler.setLevel(log_level)
     file_handler.setFormatter(formatter)
 
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(LOG_LEVEL)
-    console_handler.setFormatter(formatter)
-
     logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
 
     return logger
 
