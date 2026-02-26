@@ -4,6 +4,7 @@ import json
 import time
 import queue
 import threading
+from typing import Any
 import requests
 import urllib3
 
@@ -307,7 +308,7 @@ class ParseAlbumThread(QThread):
             
             self.progress.emit(total, total, "解析完成")
             added = parsed_count if not self._stop_flag else 0
-            self.finished.emit(added, parsed_count, True)
+            self.finished.emit(added, parsed_count)
             
         except Exception as e:
             self.error.emit(str(e))
@@ -1695,7 +1696,7 @@ class MainWindow(QMainWindow):
         play_urls = LinkExtractor.build_play_urls([c.chapter_id for c in new_chapters])
         
         books = []
-        for chapter, url in zip(new_chapters, play_urls):
+        for chapter, url in zip[tuple[Any, str]](new_chapters, play_urls):
             books.append({
                 'album_id': int(book.book_id),
                 'album_name': book.title,
