@@ -1685,7 +1685,7 @@ class MainWindow(QMainWindow):
             self.manager
         )
         self.parse_thread.progress.connect(self.on_parse_progress)
-        self.parse_thread.finished.connect(self.on_parse_finished)
+        self.parse_thread.finished.connect(self.on_album_parse_finished)
         self.parse_thread.error.connect(self.on_parse_error)
         self.parse_thread.saved.connect(self._on_parse_saved)
         self.parse_thread.start()
@@ -1728,7 +1728,7 @@ class MainWindow(QMainWindow):
             self.progress_bar.setValue(current)
             self.progress_bar.setFormat(f"{current}/{total} - {message}")
     
-    def on_parse_finished(self, added_count: int, parsed_count: int):
+    def on_album_parse_finished(self, added_count: int, parsed_count: int):
         self.manager.save()
         self._refresh_album_list()
         self.refresh_display()
@@ -1996,7 +1996,7 @@ class MainWindow(QMainWindow):
         
         self.parse_thread = ParseThread(urls, list_ids, self.manager)
         self.parse_thread.progress.connect(self.on_parse_progress)
-        self.parse_thread.finished.connect(self.on_parse_finished)
+        self.parse_thread.finished.connect(self.on_parse_thread_finished)
         self.parse_thread.error.connect(self.on_parse_error)
         self.parse_thread.start()
 
@@ -2006,11 +2006,12 @@ class MainWindow(QMainWindow):
         self.progress_bar.setFormat(f"{current}/{total}")
         self.status_label.setText(f"正在解析 {current}/{total}")
 
-    def on_parse_finished(self, results: list):
+    def on_parse_thread_finished(self, results: list):
         self._set_buttons_enabled(True)
         self.btn_stop.setEnabled(False)
         
         parsed_count = len(results)
+        total = len(self.parse_list_ids)
         
         for audio_info in results:
             list_id = audio_info.get('list_id')
@@ -2025,8 +2026,8 @@ class MainWindow(QMainWindow):
         
         if self.auto_download_after_parse:
             self.auto_download_after_parse = False
-            self.statusBar().showMessage(f"解析完成，开始下载 {parsed_count} 个任务...", 3000)
-            logger.info(f"解析完成，成功获取 {parsed_count} 个音频信息，开始自动下载")
+            self.statusBar().showMessage(f"解析完成，成功解析 {parsed_count}/{total} 个任务...", 3000)
+            logger.info(f"解析完成，成功获取 {parsed_count}/{total} 个音频信息，开始自动下载")
             
             tasks_to_download = []
             for list_id in self.parse_list_ids:
@@ -2041,9 +2042,9 @@ class MainWindow(QMainWindow):
         self.progress_bar.setVisible(False)
         QMessageBox.information(
             self, "完成",
-            f"解析完成，成功获取 {parsed_count} 个音频信息\n\n解析结果有时限，如无法下载请重新解析"
+            f"解析完成，成功获取 {parsed_count}/{total} 个音频信息\n\n解析结果有时限，如无法下载请重新解析"
         )
-        logger.info(f"解析完成，成功获取 {parsed_count} 个音频信息")  
+        logger.info(f"解析完成，成功获取 {parsed_count}/{total} 个音频信息")  
 
     def on_parse_error(self, error: str):
         self._set_buttons_enabled(True)
