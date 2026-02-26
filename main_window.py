@@ -1210,6 +1210,7 @@ class MainWindow(QMainWindow):
 
     def _create_toolbar(self) -> QWidget:
         widget = QWidget()
+        widget.setFixedHeight(55)
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 5, 0, 5)
 
@@ -1217,15 +1218,15 @@ class MainWindow(QMainWindow):
         self.btn_search.clicked.connect(self.show_search_dialog)
         layout.addWidget(self.btn_search)
 
-        self.btn_import = QPushButton("📁 导入文件")
+        '''self.btn_import = QPushButton("📁 导入文件")
         self.btn_import.clicked.connect(self.import_from_file)
-        layout.addWidget(self.btn_import)
+        layout.addWidget(self.btn_import)'''
 
         self.btn_update_catalog = QPushButton("🔄 更新目录")
         self.btn_update_catalog.clicked.connect(self.update_catalog)
         layout.addWidget(self.btn_update_catalog)
 
-        layout.addSpacing(20)
+        layout.addSpacing(10)
 
         self.btn_parse = QPushButton("⚡ 解析选中")
         self.btn_parse.clicked.connect(self.parse_selected)
@@ -1243,7 +1244,7 @@ class MainWindow(QMainWindow):
         self.btn_invert_selection.clicked.connect(self.invert_selection)
         layout.addWidget(self.btn_invert_selection)
 
-        layout.addSpacing(20)
+        layout.addSpacing(10)
 
         self.btn_download = QPushButton("⬇️ 下载选中")
         self.btn_download.clicked.connect(self.download_selected)
@@ -1253,11 +1254,11 @@ class MainWindow(QMainWindow):
         self.btn_download_all.clicked.connect(self.download_all_undownloaded)
         layout.addWidget(self.btn_download_all)
 
-        self.btn_parse_and_download_all = QPushButton("⚡⬇️ 解析并下载全部")
+        self.btn_parse_and_download_all = QPushButton("⬇️ 解析并下载全部")
         self.btn_parse_and_download_all.clicked.connect(self.parse_and_download_all)
         layout.addWidget(self.btn_parse_and_download_all)
 
-        layout.addSpacing(20)
+        layout.addSpacing(15)
 
         self.btn_stop = QPushButton("⏹ 终止任务")
         self.btn_stop.setObjectName("stop_btn")
