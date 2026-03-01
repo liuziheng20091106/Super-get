@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.0.1",
   "request_interval": 10,
   "request_timeout": 10,
   "max_retries": 3,

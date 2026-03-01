@@ -51,14 +51,15 @@ class Config:
     def _get_default_config(self) -> Dict[str, Any]:
         """获取默认配置"""
         return {
-            "version": "1.0.0",
+            "version": "1.0.1",
             "request_interval": 1,
             "request_timeout": 10,
             "max_retries": 3,
-            "max_workers": 4,
+            "max_workers": 2,
             "download_timeout": 60,
             "default_download_dir": "downloads",
-            "log_level": "INFO"
+            "log_level": "INFO",
+            "auto_sync": 1.0
         }
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -147,7 +148,12 @@ class Config:
     @property
     def version(self) -> str:
         """版本号"""
-        return self.get('version', '1.0.0')
+        return self.get('version', '1.0.1')
+
+    @property
+    def auto_sync(self) -> float:
+        """自动同步间隔（小时）"""
+        return self.get('auto_sync', 1.0)
 
     def to_dict(self) -> Dict[str, Any]:
         """将配置转换为字典"""

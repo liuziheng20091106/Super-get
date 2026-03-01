@@ -18,6 +18,7 @@
 - 修改下载状态
 - 获取未下载的章节列表
 - 下载管理(多线程下载、暂停、恢复、取消)
+- 定时同步任务
 """
 
 import json
@@ -27,6 +28,7 @@ from module.data_provider import BookInfo, ChapterInfo, SearchResult
 from module import api_client
 from module.config import Config
 from module.download_manager import DownloadManager
+from module.sync_timer import SyncTimer
 
 
 class Manager:
@@ -46,6 +48,7 @@ class Manager:
         self.token: Optional[str] = None
         self.books: list[BookInfo] = []
         self._download_manager: Optional[DownloadManager] = None
+        self._sync_timer: Optional[SyncTimer] = None
         self._init_params()
 
     def _init_params(self) -> None:
@@ -276,17 +279,23 @@ class Manager:
         try:
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             
+            timer_book_ids = []
+            if self._sync_timer:
+                timer_book_ids = self._sync_timer.get_book_ids()
+            
             data = {
                 "base_url": self.base_url,
                 "token": self.token,
-                "books": [book.to_dict() for book in self.books]
+                "books": [book.to_dict() for book in self.books],
+                "timer_book_ids": timer_book_ids,
+                "auto_sync": self.config.auto_sync
             }
             
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             
             if self.logger:
-                self.logger.info(f"[保存数据] 保存成功: {file_path}, 书籍数: {len(self.books)}")
+                self.logger.info(f"[保存数据] 保存成功: {file_path}, 书籍数: {len(self.books)}, 定时任务书籍ID: {timer_book_ids}")
             return True
         except Exception as e:
             if self.logger:
@@ -320,8 +329,17 @@ class Manager:
                 book = BookInfo.from_dict(book_data)
                 self.books.append(book)
             
+            timer_book_ids = data.get('timer_book_ids', [])
+            if timer_book_ids:
+                auto_sync = data.get('auto_sync', self.config.auto_sync)
+                self.start_sync_timer(interval_hours=auto_sync)
+                for book_id in timer_book_ids:
+                    book = self.get_book_by_id(book_id)
+                    if book:
+                        self.add_book_to_timer(book)
+            
             if self.logger:
-                self.logger.info(f"[加载数据] 加载成功: {file_path}, 书籍数: {len(self.books)}")
+                self.logger.info(f"[加载数据] 加载成功: {file_path}, 书籍数: {len(self.books)}, 定时任务书籍ID: {timer_book_ids}")
             return True
         except Exception as e:
             if self.logger:
@@ -385,6 +403,34 @@ class Manager:
         if self.logger:
             self.logger.info(f"[下载管理] 开始下载: {book.Title}, 章节数: {len(undownloaded)}")
 
+    def sync_and_download(self, book: BookInfo) -> bool:
+        """
+        一条龙服务：更新章节 -> 获取未下载章节 -> 添加下载任务
+        
+        Args:
+            book: 书籍信息
+            
+        Returns:
+            是否成功启动下载
+        """
+        if self.logger:
+            self.logger.info(f"[下载管理] 开始同步: {book.Title}")
+        
+        chapters = self.update_chapters(book)
+        if chapters is False:
+            if self.logger:
+                self.logger.error(f"[下载管理] 同步失败: {book.Title}")
+            return False
+        
+        undownloaded = self.get_undownloaded_chapters(book)
+        if not undownloaded:
+            if self.logger:
+                self.logger.info(f"[下载管理] 暂无未下载章节: {book.Title}")
+            return True
+        
+        self.start_download(book)
+        return True
+
     def pause_download(self) -> None:
         """暂停下载"""
         if self._download_manager:
@@ -404,6 +450,68 @@ class Manager:
         """等待下载完成"""
         if self._download_manager:
             self._download_manager.wait()
+
+    def start_sync_timer(self, interval_hours: float = None) -> None:
+        """
+        启动定时同步任务
+        
+        Args:
+            interval_hours: 同步间隔（小时），如果不传则从 config 读取
+        """
+        if self._sync_timer and self._sync_timer._is_running:
+            if self.logger:
+                self.logger.warning(f"[定时任务] 定时器已在运行")
+            return
+        
+        if interval_hours is None:
+            interval_hours = self.config.auto_sync
+        
+        self._sync_timer = SyncTimer(
+            interval_hours=interval_hours,
+            sync_func=self.sync_and_download,
+            logger=self.logger
+        )
+        self._sync_timer.set_book_provider(self.get_book_by_id)
+        self._sync_timer.start()
+
+    def stop_sync_timer(self) -> None:
+        """停止定时同步任务"""
+        if self._sync_timer:
+            self._sync_timer.stop()
+
+    def add_book_to_timer(self, book: BookInfo) -> None:
+        """
+        向定时任务添加书籍
+        
+        Args:
+            book: 书籍信息
+        """
+        if not self._sync_timer:
+            if self.logger:
+                self.logger.warning(f"[定时任务] 定时器未启动，请先调用 start_sync_timer")
+            return
+        self._sync_timer.add_book(book)
+
+    def remove_book_from_timer(self, book: BookInfo) -> None:
+        """
+        从定时任务移除书籍
+        
+        Args:
+            book: 书籍信息
+        """
+        if self._sync_timer:
+            self._sync_timer.remove_book_by_id(book.id)
+
+    def get_timer_book_ids(self) -> list:
+        """
+        获取定时任务中的书籍ID列表
+        
+        Returns:
+            书籍ID列表
+        """
+        if self._sync_timer:
+            return self._sync_timer.get_book_ids()
+        return []
 
     def get_download_status(self) -> dict:
         """
