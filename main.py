@@ -1,12 +1,20 @@
-import sys
-import traceback
-from main_window import main
-from logger import log_crash
+from logger import get_logger
+from config import get_config
 
-def global_exception_handler(exc_type, exc_value, exc_traceback):
-    log_crash(exc_type, exc_value, exc_traceback)
-    traceback.print_exception(exc_type, exc_value, exc_traceback)
 
+def main():
+    config = get_config("config.json")
+    logger_config = {
+        'console': {'enabled': True, 'use_color': True, 'level': config.log_level}
+    }
+    logger = get_logger('365Ting', logger_config)
+    logger.add_timed_file_handler(
+        filename='logs/app.log',
+        when='H',
+        interval=1,
+        backup_count=24,
+        level=config.log_level
+    )
+    logger.info(f"程序启动")
 if __name__ == "__main__":
-    sys.excepthook = global_exception_handler
     main()
