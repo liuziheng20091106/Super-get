@@ -7,7 +7,7 @@ import sys
 import threading
 from datetime import datetime
 from enum import IntEnum
-from typing import Optional, Dict, Any, Union
+from typing import Optional, Dict, Any, Union, Literal
 from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
 
 
@@ -89,7 +89,7 @@ class LogFormatter(logging.Formatter):
         self,
         fmt: Optional[str] = None,
         datefmt: str = '%Y-%m-%d %H:%M:%S',
-        style: str = '%'
+        style: Any = '%'
     ):
         super().__init__(fmt or self.DEFAULT_FORMAT, datefmt, style)
 

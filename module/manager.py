@@ -23,7 +23,7 @@
 
 import json
 import os
-from typing import Optional, Union, Any
+from typing import Optional, Union, Any, cast
 from module.data_provider import BookInfo, ChapterInfo, SearchResult
 from module import api_client
 from module.config import Config
@@ -58,9 +58,11 @@ class Manager:
         if not self.base_url:
             raise RuntimeError("[管理器] 获取BaseURL失败")
         
-        self.token = self.get_token()
-        if not self.token:
+        token = self.get_token()
+        if not token:
             raise RuntimeError("[管理器] 获取Token失败")
+        
+        self.token = token
         
         if self.logger:
             self.logger.info(f"[管理器] 初始化成功, BaseURL: {self.base_url}")
@@ -73,7 +75,7 @@ class Manager:
             基础URL字符串，失败返回None
         """
         result = api_client.get_base_url(logger=self.logger)
-        if result:
+        if isinstance(result, str):
             return result
         return None
 
@@ -85,7 +87,7 @@ class Manager:
             Token字符串，失败返回None
         """
         result = api_client.get_token(logger=self.logger)
-        if result:
+        if isinstance(result, str):
             return result
         return None
 
@@ -99,6 +101,11 @@ class Manager:
         Returns:
             SearchResult列表，失败返回False
         """
+        if not self.base_url or not self.token:
+            if self.logger:
+                self.logger.error("[搜索书籍] BaseURL或Token未初始化")
+            return False
+        
         return api_client.search_books(
             self.base_url, 
             keyword, 
@@ -124,18 +131,24 @@ class Manager:
                     self.logger.info(f"[添加书籍] 书籍已存在: {search_result.bookTitle}")
                 return False
         
+        if not self.base_url:
+            if self.logger:
+                self.logger.error(f"[添加书籍] BaseURL未初始化")
+            return False
+        
         detail = api_client.get_book_detail(self.base_url, search_result.id, logger=self.logger)
-        if detail is False:
+        if detail is False or detail is None:
             if self.logger:
                 self.logger.error(f"[添加书籍] 获取书籍详情失败: {search_result.id}")
             return False
         
-        self.books.append(detail)
+        book_info = cast(BookInfo, detail)
+        self.books.append(book_info)
         
-        self.update_chapters(detail)
+        self.update_chapters(book_info)
         
         if self.logger:
-            self.logger.info(f"[添加书籍] 添加成功: {detail.Title}")
+            self.logger.info(f"[添加书籍] 添加成功: {book_info.Title}")
         return True
 
     def get_books(self) -> list[BookInfo]:
@@ -191,16 +204,22 @@ class Manager:
         Returns:
             ChapterInfo列表，失败返回False
         """
+        if not self.base_url:
+            if self.logger:
+                self.logger.error(f"[更新章节] BaseURL未初始化")
+            return False
+        
         chapters = api_client.get_chapter_list(self.base_url, book.id, logger=self.logger)
-        if chapters is False:
+        if chapters is False or chapters is None:
             if self.logger:
                 self.logger.error(f"[更新章节] 获取章节列表失败: {book.id}")
             return False
         
+        chapter_list = cast(list[ChapterInfo], chapters)
         existing_chapters = {ch.chapterid: ch for ch in book.Chapters}
         
         new_chapters = []
-        for new_ch in chapters:
+        for new_ch in chapter_list:
             if new_ch.chapterid in existing_chapters:
                 existing_ch = existing_chapters[new_ch.chapterid]
                 new_ch.downloaded = existing_ch.downloaded
@@ -225,20 +244,26 @@ class Manager:
         Returns:
             BookInfo，失败返回False
         """
+        if not self.base_url:
+            if self.logger:
+                self.logger.error(f"[更新详情] BaseURL未初始化")
+            return False
+        
         detail = api_client.get_book_detail(self.base_url, book.id, logger=self.logger)
-        if detail is False:
+        if detail is False or detail is None:
             if self.logger:
                 self.logger.error(f"[更新详情] 获取详情失败: {book.id}")
             return False
         
+        detail_info = cast(BookInfo, detail)
         old_chapters = book.Chapters
-        book.id = detail.id
-        book.count = detail.count
-        book.UpdateStatus = detail.UpdateStatus
-        book.Image = detail.Image
-        book.Desc = detail.Desc
-        book.Title = detail.Title
-        book.Anchor = detail.Anchor
+        book.id = detail_info.id
+        book.count = detail_info.count
+        book.UpdateStatus = detail_info.UpdateStatus
+        book.Image = detail_info.Image
+        book.Desc = detail_info.Desc
+        book.Title = detail_info.Title
+        book.Anchor = detail_info.Anchor
         book.Chapters = old_chapters
         
         if self.logger:
@@ -367,7 +392,7 @@ class Manager:
         刷新所有书籍的章节列表
         """
         for book in self.books:
-            self.update_chapters(book)
+            self.update_chapters(cast(BookInfo, book))
 
     def get_download_progress(self, book: BookInfo) -> dict:
         """
@@ -406,6 +431,11 @@ class Manager:
             return
         
         if self._download_manager is None:
+            if not self.base_url:
+                if self.logger:
+                    self.logger.error(f"[下载管理] BaseURL未初始化")
+                return
+            
             self._download_manager = DownloadManager(
                 config=self.config.to_dict(),
                 logger=self.logger,
@@ -467,7 +497,7 @@ class Manager:
         if self._download_manager:
             self._download_manager.wait()
 
-    def start_sync_timer(self, interval_hours: float = None) -> None:
+    def start_sync_timer(self, interval_hours: Optional[float] = None) -> None:
         """
         启动定时同步任务
         
