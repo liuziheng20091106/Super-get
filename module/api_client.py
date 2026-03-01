@@ -7,7 +7,7 @@ import time
 import requests
 from typing import Optional, Dict, Any, Union
 
-from data_provider import BookInfo, ChapterInfo, SearchResult
+from module.data_provider import BookInfo, ChapterInfo, SearchResult
 
 
 CONFIG_URL = "http://101.43.48.231:8090"
@@ -318,7 +318,7 @@ def get_chapter_url(baseurl: str, chapter_id: int, book_id: int, logger=None, re
         response.raise_for_status()
         data = response.json()
 
-        if data.get("src") and "download" in data["src"]:
+        if data.get("src") in data["src"]:
             if logger:
                 logger.info(f"[获取章节URL] 成功获取音频URL, 章节ID: {chapter_id}")
             return data["src"]

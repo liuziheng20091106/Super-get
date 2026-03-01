@@ -30,7 +30,8 @@ class Config:
     def _get_default_config_path(self) -> str:
         """获取默认配置文件路径"""
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        return os.path.join(current_dir, 'config.json')
+        project_root = os.path.dirname(current_dir)
+        return os.path.join(project_root, 'config.json')
 
     def _load_config(self):
         """从 JSON 文件加载配置"""
@@ -51,10 +52,10 @@ class Config:
         """获取默认配置"""
         return {
             "version": "1.0.0",
-            "request_interval": 0.5,
+            "request_interval": 1,
             "request_timeout": 10,
             "max_retries": 3,
-            "max_workers": 32,
+            "max_workers": 4,
             "download_timeout": 60,
             "default_download_dir": "downloads",
             "log_level": "INFO"

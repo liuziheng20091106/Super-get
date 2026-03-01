@@ -1,5 +1,5 @@
-from logger import get_logger
-from config import get_config
+from module.logger import get_logger
+from module.config import get_config
 
 
 def main():
@@ -16,5 +16,6 @@ def main():
         level=config.log_level
     )
     logger.info(f"程序启动")
+    manager = Manager(logger=logger)
 if __name__ == "__main__":
     main()

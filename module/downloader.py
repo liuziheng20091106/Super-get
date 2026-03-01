@@ -6,8 +6,8 @@ import time
 import requests
 from typing import Optional
 
-from data_provider import ChapterInfo
-from api_client import get_chapter_url
+from module.data_provider import ChapterInfo
+from module.api_client import get_chapter_url
 
 
 class Downloader:
@@ -15,18 +15,19 @@ class Downloader:
     下载器类，负责下载章节音频文件
     """
 
-    def __init__(self, chapter_info: ChapterInfo, logger, config):
+    def __init__(self, chapter_info: ChapterInfo, logger, config, base_url: str = ""):
         """
         初始化下载器
 
         :param chapter_info: 章节信息对象
         :param logger: 日志记录器
         :param config: 配置对象
+        :param base_url: API基础URL
         """
         self.chapter_info = chapter_info
         self.logger = logger
         self.config = config
-        self.baseurl = config.get('baseurl', '')
+        self.baseurl = base_url
 
     def download(self) -> bool:
         """
@@ -201,14 +202,15 @@ class Downloader:
             return False
 
 
-def download_chapter(chapter_info: ChapterInfo, logger, config) -> bool:
+def download_chapter(chapter_info: ChapterInfo, logger, config, base_url: str = "") -> bool:
     """
     下载章节音频文件
 
     :param chapter_info: 章节信息对象
     :param logger: 日志记录器
     :param config: 配置对象
+    :param base_url: API基础URL
     :return: 下载成功返回True，失败返回False
     """
-    downloader = Downloader(chapter_info, logger, config)
+    downloader = Downloader(chapter_info, logger, config, base_url)
     return downloader.download()
