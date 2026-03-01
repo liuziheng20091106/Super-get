@@ -1,7 +1,7 @@
 {
     "python-envs.defaultEnvManager": "ms-python.python:system",
     "python.analysis.autoImportCompletions": true,
-    "python.languageServer": "Default",
+    "python.languageServer": "None",
     "python.terminal.activateEnvInCurrentTerminal": true,
     "basedpyright.analysis.typeCheckingMode": "standard"
 }
