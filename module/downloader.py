@@ -80,7 +80,7 @@ class Downloader:
                 return False
 
             if attempt < max_retries:
-                wait_time = attempt * 2
+                wait_time = attempt * self.config.request_interval * 2
                 if self.logger:
                     self.logger.info(f"[下载模块] 等待 {wait_time} 秒后重试...")
                 time.sleep(wait_time)
@@ -116,11 +116,13 @@ class Downloader:
         download_dir = self.config.get('default_download_dir', 'downloads')
         book_title = self.chapter_info.bookTitle or '未知书籍'
         safe_book_title = self._sanitize_filename(book_title)
+        book_anchor = self.chapter_info.bookAnchor or '未知主播'
+        safe_book_anchor = self._sanitize_filename(book_anchor)
         chapter_title = self.chapter_info.title or '未知章节'
         safe_chapter_title = self._sanitize_filename(chapter_title)
         position = self.chapter_info.position
 
-        full_dir = os.path.join(download_dir, safe_book_title)
+        full_dir = os.path.join(download_dir, f"{safe_book_title} - {safe_book_anchor}")
         os.makedirs(full_dir, exist_ok=True)
 
         filename = f"{position:04d}_{safe_chapter_title}.mp3"

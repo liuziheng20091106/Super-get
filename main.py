@@ -1,6 +1,8 @@
 from module.logger import get_logger
 from module.config import get_config
-
+from module.manager import Manager
+from api import create_app
+import uvicorn
 
 def main():
     config = get_config("config.json")
@@ -17,5 +19,7 @@ def main():
     )
     logger.info(f"程序启动")
     manager = Manager(logger=logger)
+    app = create_app(manager)
+    uvicorn.run(app, host="0.0.0.0", port=5000)
 if __name__ == "__main__":
     main()

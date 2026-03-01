@@ -23,7 +23,7 @@
           "bookAnchor": "麦疯的思远",
           "bookDesc": "",
           "bookImage": "https://app.365ting.com/uploads/20241116/882643d86fc91fa95e2a1c2f1aac1571.jpg",
-          "downloaded": false
+          "downloaded": true
         },
         {
           "chapterid": 16921470,
@@ -37,7 +37,7 @@
           "bookAnchor": "麦疯的思远",
           "bookDesc": "",
           "bookImage": "https://app.365ting.com/uploads/20241116/882643d86fc91fa95e2a1c2f1aac1571.jpg",
-          "downloaded": false
+          "downloaded": true
         },
         {
           "chapterid": 16921471,
@@ -51,7 +51,7 @@
           "bookAnchor": "麦疯的思远",
           "bookDesc": "",
           "bookImage": "https://app.365ting.com/uploads/20241116/882643d86fc91fa95e2a1c2f1aac1571.jpg",
-          "downloaded": false
+          "downloaded": true
         },
         {
           "chapterid": 16921472,
@@ -65,7 +65,7 @@
           "bookAnchor": "麦疯的思远",
           "bookDesc": "",
           "bookImage": "https://app.365ting.com/uploads/20241116/882643d86fc91fa95e2a1c2f1aac1571.jpg",
-          "downloaded": false
+          "downloaded": true
         },
         {
           "chapterid": 16921473,
@@ -79,7 +79,7 @@
           "bookAnchor": "麦疯的思远",
           "bookDesc": "",
           "bookImage": "https://app.365ting.com/uploads/20241116/882643d86fc91fa95e2a1c2f1aac1571.jpg",
-          "downloaded": false
+          "downloaded": true
         },
         {
           "chapterid": 16921474,
@@ -93,7 +93,7 @@
           "bookAnchor": "麦疯的思远",
           "bookDesc": "",
           "bookImage": "https://app.365ting.com/uploads/20241116/882643d86fc91fa95e2a1c2f1aac1571.jpg",
-          "downloaded": false
+          "downloaded": true
         },
         {
           "chapterid": 16921475,
@@ -36357,5 +36357,7 @@
         }
       ]
     }
-  ]
+  ],
+  "timer_book_ids": [],
+  "auto_sync": 1.0
 }

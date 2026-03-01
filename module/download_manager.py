@@ -74,33 +74,54 @@ class DownloadManager:
         self._downloaded_count = 0
         self._failed_count = 0
 
-    def add_task(self, chapter: ChapterInfo) -> None:
+    def add_task(self, chapter: ChapterInfo) -> bool:
         """
         添加单个下载任务
         
         Args:
             chapter: 章节信息
+            
+        Returns:
+            是否添加成功
         """
-        task = DownloadTask(chapter=chapter, base_url=self.base_url)
+        if chapter.downloaded:
+            if self.logger:
+                self.logger.info(f"[下载管理] 章节已下载，跳过: {chapter.title}")
+            return False
+        
         with self._lock:
+            existing_ids = set(t.chapter.chapterid for t in self._tasks)
+            if chapter.chapterid in existing_ids:
+                if self.logger:
+                    self.logger.info(f"[下载管理] 任务已存在，跳过: {chapter.title}")
+                return False
+            
+            task = DownloadTask(chapter=chapter, base_url=self.base_url)
             self._tasks.append(task)
             self._pending_queue.append(task)
         
         if self.logger:
             self.logger.info(f"[下载管理] 添加任务: {chapter.title}")
+        return True
 
-    def add_tasks(self, chapters: list[ChapterInfo]) -> None:
+    def add_tasks(self, chapters: list[ChapterInfo]) -> int:
         """
         批量添加下载任务
         
         Args:
             chapters: 章节信息列表
+            
+        Returns:
+            实际添加的任务数
         """
+        count = 0
         for chapter in chapters:
-            self.add_task(chapter)
+            if self.add_task(chapter):
+                count += 1
         
         if self.logger:
-            self.logger.info(f"[下载管理] 批量添加 {len(chapters)} 个任务")
+            self.logger.info(f"[下载管理] 批量添加 {count}/{len(chapters)} 个任务")
+        return count
 
     def start(self) -> None:
         """启动下载"""

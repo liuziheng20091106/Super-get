@@ -50,6 +50,7 @@ class Manager:
         self._download_manager: Optional[DownloadManager] = None
         self._sync_timer: Optional[SyncTimer] = None
         self._init_params()
+        self.load_from_json()
 
     def _init_params(self) -> None:
         """初始化基本参数"""
@@ -130,6 +131,9 @@ class Manager:
             return False
         
         self.books.append(detail)
+        
+        self.update_chapters(detail)
+        
         if self.logger:
             self.logger.info(f"[添加书籍] 添加成功: {detail.Title}")
         return True
@@ -253,6 +257,18 @@ class Manager:
             未下载的章节列表
         """
         return [ch for ch in book.Chapters if not ch.downloaded]
+    
+    def len_downloaded_chapters(self, book: BookInfo) -> int:
+        """
+        获取已下载的章节数
+        
+        Args:
+            book: 书籍信息
+            
+        Returns:
+            已下载的章节数
+        """
+        return sum(1 for ch in book.Chapters if ch.downloaded)
 
     def set_chapter_downloaded(self, chapter: ChapterInfo, downloaded: bool = True) -> None:
         """
@@ -463,6 +479,11 @@ class Manager:
                 self.logger.warning(f"[定时任务] 定时器已在运行")
             return
         
+        existing_book_ids = []
+        if self._sync_timer:
+            existing_book_ids = self._sync_timer.get_book_ids()
+            self._sync_timer.stop()
+        
         if interval_hours is None:
             interval_hours = self.config.auto_sync
         
@@ -472,6 +493,12 @@ class Manager:
             logger=self.logger
         )
         self._sync_timer.set_book_provider(self.get_book_by_id)
+        
+        for book_id in existing_book_ids:
+            book = self.get_book_by_id(book_id)
+            if book:
+                self._sync_timer.add_book(book)
+        
         self._sync_timer.start()
 
     def stop_sync_timer(self) -> None:
@@ -479,28 +506,39 @@ class Manager:
         if self._sync_timer:
             self._sync_timer.stop()
 
-    def add_book_to_timer(self, book: BookInfo) -> None:
+    def add_book_to_timer(self, book: BookInfo) -> bool:
         """
         向定时任务添加书籍
         
         Args:
             book: 书籍信息
+            
+        Returns:
+            是否添加成功
         """
         if not self._sync_timer:
             if self.logger:
                 self.logger.warning(f"[定时任务] 定时器未启动，请先调用 start_sync_timer")
-            return
+            return False
         self._sync_timer.add_book(book)
+        return True
 
-    def remove_book_from_timer(self, book: BookInfo) -> None:
+    def remove_book_from_timer(self, book: BookInfo) -> bool:
         """
         从定时任务移除书籍
         
         Args:
             book: 书籍信息
+            
+        Returns:
+            是否移除成功
         """
-        if self._sync_timer:
-            self._sync_timer.remove_book_by_id(book.id)
+        if not self._sync_timer:
+            if self.logger:
+                self.logger.warning(f"[定时任务] 定时器未启动")
+            return False
+        self._sync_timer.remove_book_by_id(book.id)
+        return True
 
     def get_timer_book_ids(self) -> list:
         """
@@ -542,3 +580,51 @@ class Manager:
             success: 是否下载成功
         """
         self.set_chapter_downloaded(chapter, success)
+
+    def get_config(self) -> dict:
+        """
+        获取当前配置
+        
+        Returns:
+            配置字典
+        """
+        return self.config.to_dict()
+
+    def set_config(self, key: str, value: Any) -> bool:
+        """
+        设置配置项
+        
+        Args:
+            key: 配置键名
+            value: 配置值
+            
+        Returns:
+            是否设置成功
+        """
+        try:
+            self.config.set(key, value)
+            self.config.save()
+            if self.logger:
+                self.logger.info(f"[配置管理] 设置配置成功: {key} = {value}")
+            return True
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"[配置管理] 设置配置失败: {str(e)}")
+            return False
+
+    def save_config(self) -> bool:
+        """
+        保存配置到文件
+        
+        Returns:
+            是否保存成功
+        """
+        try:
+            self.config.save()
+            if self.logger:
+                self.logger.info(f"[配置管理] 保存配置成功")
+            return True
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"[配置管理] 保存配置失败: {str(e)}")
+            return False
