@@ -17,9 +17,10 @@ def main():
         backup_count=24,
         level=config.log_level
     )
-    logger.info(f"程序启动")
+    logger.info(f"程序启动，版本：{config.version}")
     manager = Manager(logger=logger)
     app = create_app(manager)
     uvicorn.run(app, host="0.0.0.0", port=5000)
+    logger.info(f"程序退出")
 if __name__ == "__main__":
     main()

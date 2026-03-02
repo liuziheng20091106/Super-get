@@ -8,7 +8,8 @@ import threading
 import queue
 import time
 from enum import Enum
-from typing import Optional, Callable
+from typing import Optional, Callable, Any, Union, Dict
+from module.config import Config
 from dataclasses import dataclass
 
 from module.data_provider import ChapterInfo
@@ -43,7 +44,7 @@ class DownloadManager:
     逻辑：每隔 request_interval 秒检查一次是否有空余线程，如果有则添加任务
     """
 
-    def __init__(self, config: dict, logger=None, base_url: str = "", on_complete: Optional[Callable] = None):
+    def __init__(self, config: Union[dict, Config], logger=None, base_url: str = "", on_complete: Optional[Callable] = None):
         """
         初始化下载管理器
         

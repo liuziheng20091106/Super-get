@@ -200,7 +200,7 @@ def create_app(manager: Manager) -> FastAPI:
                 if not base_url:
                     raise HTTPException(status_code=500, detail="BaseURL未配置")
                 mgr._download_manager = DownloadManager(
-                    config=mgr.config.to_dict(),
+                    config=mgr.config,
                     logger=mgr.logger,
                     base_url=base_url,
                     on_complete=mgr._on_download_complete
@@ -219,7 +219,7 @@ def create_app(manager: Manager) -> FastAPI:
                         if not base_url:
                             raise HTTPException(status_code=500, detail="BaseURL未配置")
                         mgr._download_manager = DownloadManager(
-                            config=mgr.config.to_dict(),
+                            config=mgr.config,
                             logger=mgr.logger,
                             base_url=base_url,
                             on_complete=mgr._on_download_complete

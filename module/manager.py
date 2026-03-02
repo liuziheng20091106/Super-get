@@ -437,7 +437,7 @@ class Manager:
                 return
             
             self._download_manager = DownloadManager(
-                config=self.config.to_dict(),
+                config=self.config,
                 logger=self.logger,
                 base_url=self.base_url,
                 on_complete=self._on_download_complete

@@ -3,7 +3,11 @@
 """
 import json
 import os
+import shutil
+from datetime import datetime
 from typing import Any, Dict, Optional
+
+VERSION = "1.0.2"
 
 
 class Config:
@@ -47,11 +51,39 @@ class Config:
             raise ValueError(f"配置文件格式错误: {e}")
         except IOError as e:
             raise IOError(f"无法读取配置文件: {e}")
+        
+        self._check_and_backup_if_version_higher()
 
+    def _check_and_backup_if_version_higher(self):
+        """检查配置文件版本，如果高于当前版本则备份"""
+        config_version = self.get('version', '0.0.0')
+        
+        def parse_version(v: str) -> tuple:
+            """解析版本号为元组以便比较"""
+            try:
+                return tuple(map(int, v.split('.')))
+            except (ValueError, AttributeError):
+                return (0, 0, 0)
+        
+        config_ver_tuple = parse_version(config_version)
+        current_ver_tuple = parse_version(VERSION)
+        
+        if config_ver_tuple > current_ver_tuple:
+            backup_dir = os.path.join(os.path.dirname(self._config_path), 'backups')
+            os.makedirs(backup_dir, exist_ok=True)
+            
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            backup_filename = f"config_backup_{config_version}_{timestamp}.json"
+            backup_path = os.path.join(backup_dir, backup_filename)
+            
+            shutil.copy2(self._config_path, backup_path)
+        elif config_ver_tuple < current_ver_tuple:
+            self.set('version', VERSION)
+            self.save()
     def _get_default_config(self) -> Dict[str, Any]:
         """获取默认配置"""
         return {
-            "version": "1.0.1",
+            "version": VERSION,
             "request_interval": 1,
             "request_timeout": 10,
             "max_retries": 3,
@@ -59,7 +91,10 @@ class Config:
             "download_timeout": 60,
             "default_download_dir": "downloads",
             "log_level": "INFO",
-            "auto_sync": 1.0
+            "auto_sync": 1.0,
+            "music_metadata": {
+                "level": 1
+            }
         }
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -148,16 +183,28 @@ class Config:
     @property
     def version(self) -> str:
         """版本号"""
-        return self.get('version', '1.0.1')
+        return VERSION
 
     @property
     def auto_sync(self) -> float:
         """自动同步间隔（小时）"""
         return self.get('auto_sync', 1.0)
 
+    @property
+    def music_metadata_level(self) -> int:
+        """音乐元数据写入级别：0-不写入，1-仅文本，2-包含封面"""
+        return self.get('music_metadata.level', 1)
+
     def to_dict(self) -> Dict[str, Any]:
-        """将配置转换为字典"""
-        return self._config.copy()
+        """将配置转换为字典，缺失字段使用默认值填充"""
+        default_config = self._get_default_config()
+        result = default_config.copy()
+        for key, value in self._config.items():
+            if isinstance(value, dict) and key in result and isinstance(result[key], dict):
+                result[key].update(value)
+            else:
+                result[key] = value
+        return result
 
 
 def get_config(config_path: Optional[str] = None) -> Config:

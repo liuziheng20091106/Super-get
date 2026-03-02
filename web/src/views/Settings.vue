@@ -54,6 +54,14 @@
             <label>默认下载目录</label>
             <input type="text" v-model="config.default_download_dir" />
           </div>
+          <div class="form-group">
+            <label>音乐元数据写入</label>
+            <select v-model.number="config.music_metadata.level">
+              <option :value="0">不写入（保留源文件）</option>
+              <option :value="1">写入文本信息（标题、专辑、艺术家、序号）</option>
+              <option :value="2">写入所有内容（含封面图片，占用更多空间）</option>
+            </select>
+          </div>
         </div>
 
         <div class="card">
@@ -109,7 +117,10 @@ const config = ref({
   download_timeout: 60,
   default_download_dir: 'downloads',
   log_level: 'INFO',
-  auto_sync: 1.0
+  auto_sync: 1.0,
+  music_metadata: {
+    level: 0
+  }
 })
 
 const loadConfig = async () => {
@@ -156,6 +167,22 @@ const saveConfig = async () => {
       }
       return
     }
+  }
+
+  try {
+    const res = await apiFetch('/api/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: 'music_metadata', value: config.value.music_metadata })
+    })
+    if (!res.ok) {
+      throw new Error()
+    }
+  } catch (e) {
+    if (toastRef.value) {
+      toastRef.value.show('保存 music_metadata 失败')
+    }
+    return
   }
 
   if (toastRef.value) {
