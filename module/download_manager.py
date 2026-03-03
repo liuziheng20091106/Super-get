@@ -44,12 +44,12 @@ class DownloadManager:
     逻辑：每隔 request_interval 秒检查一次是否有空余线程，如果有则添加任务
     """
 
-    def __init__(self, config: Union[dict, Config], logger=None, base_url: str = "", on_complete: Optional[Callable] = None):
+    def __init__(self, config: Config, logger=None, base_url: str = "", on_complete: Optional[Callable] = None):
         """
         初始化下载管理器
         
         Args:
-            config: 配置字典，需要包含 max_workers, request_interval, max_retries, download_timeout, default_download_dir
+            config: 配置对象
             logger: 日志记录器
             base_url: API基础URL
             on_complete: 下载完成回调函数，签名为 on_complete(chapter: ChapterInfo, success: bool)
@@ -227,7 +227,8 @@ class DownloadManager:
                 
                 with self._lock:
                     self._active_tasks[task.chapter.chapterid] = task
-            
+            self.request_interval = self.config.request_interval # 从配置中获取请求间隔
+            self.max_workers = self.config.max_workers # 从配置中获取最大并发数
             time.sleep(self.request_interval)
 
     def _worker(self, task: DownloadTask) -> None:

@@ -64,13 +64,14 @@ class Downloader:
 
         max_retries = self.config.get('max_retries', 3)
         download_timeout = self.config.get('download_timeout', 60)
+        request_timeout = self.config.get('request_timeout', 10)
 
         for attempt in range(1, max_retries + 1):
             try:
                 if self.logger:
                     self.logger.info(f"[下载模块] 开始下载章节: {chapter_title}, 章节ID: {chapter_id}, 尝试 {attempt}/{max_retries}")
 
-                audio_url = self._get_audio_url(chapter_id, book_id)
+                audio_url = self._get_audio_url(chapter_id, book_id, request_timeout, _is_retry=(attempt > 1))
                 if not audio_url:
                     if self.logger:
                         self.logger.warning(f"[下载模块] 获取音频URL失败, 章节ID: {chapter_id}")
@@ -78,7 +79,7 @@ class Downloader:
 
                 file_ext = self._extract_extension(audio_url)
                 save_path = self._get_save_path(file_ext)
-                if self._download_file(audio_url, save_path, download_timeout):
+                if self._download_file(audio_url, save_path, download_timeout, request_timeout):
                     self._write_metadata(save_path)
                     if self.logger:
                         self.logger.info(f"[下载模块] 下载成功: {chapter_title}, 保存路径: {save_path}")
@@ -114,16 +115,19 @@ class Downloader:
             self.logger.error(f"[下载模块] 下载失败，已达到最大重试次数 {max_retries}, 章节ID: {chapter_id}")
         return False
 
-    def _get_audio_url(self, chapter_id: int, book_id: int) -> Optional[str]:
+    def _get_audio_url(self, chapter_id: int, book_id: int, request_timeout: int, _is_retry: bool = False) -> Optional[str]:
         """
         获取音频下载链接
 
         :param chapter_id: 章节ID
         :param book_id: 书籍ID
+        :param request_timeout: 请求超时时间（秒）
+        :param _is_retry: 是否重试（内部使用）
+        
         :return: 音频URL，失败返回None
         """
         try:
-            result = get_chapter_url(self.baseurl, chapter_id, book_id, self.logger)
+            result = get_chapter_url(self.baseurl, chapter_id, book_id, self.logger, request_timeout=request_timeout, _is_retry=_is_retry)
             if result and isinstance(result, str):
                 return result
             return None
@@ -519,13 +523,14 @@ class Downloader:
         
         return base64.b64encode(data).decode('ascii')
 
-    def _download_file(self, url: str, save_path: str, timeout: int) -> bool:
+    def _download_file(self, url: str, save_path: str, timeout: int, request_timeout: int) -> bool:
         """
         下载文件到本地
 
         :param url: 下载链接
         :param save_path: 保存路径
         :param timeout: 超时时间（秒）
+        :param request_timeout: 请求超时时间（秒）
         :return: 下载成功返回True，失败返回False
         """
         try:

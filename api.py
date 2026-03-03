@@ -281,17 +281,13 @@ def create_app(manager: Manager) -> FastAPI:
         mgr = get_manager()
         return mgr.get_download_status()
 
-    class TimerRequest(BaseModel):
-        interval_hours: Optional[float] = None
-
     class TimerBookRequest(BaseModel):
         book_id: int
 
     @app.post("/api/timer/start")
-    async def timer_start(req: Optional[TimerRequest] = None):
+    async def timer_start():
         mgr = get_manager()
-        interval = req.interval_hours if req else None
-        mgr.start_sync_timer(interval_hours=interval)
+        mgr.start_sync_timer()
         return {"message": "定时任务已启动"}
 
     @app.post("/api/timer/stop")

@@ -148,15 +148,20 @@ const saveConfig = async () => {
     'download_timeout',
     'default_download_dir',
     'log_level',
-    'auto_sync'
+    'auto_sync',
+    'music_metadata'
   ]
 
   for (const key of fields) {
     try {
+      let value = config.value[key]
+      if (key === 'music_metadata') {
+        value = JSON.stringify(value)
+      }
       const res = await apiFetch('/api/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key, value: config.value[key] })
+        body: JSON.stringify({ key, value })
       })
       if (!res.ok) {
         throw new Error()
@@ -167,22 +172,6 @@ const saveConfig = async () => {
       }
       return
     }
-  }
-
-  try {
-    const res = await apiFetch('/api/config', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: 'music_metadata', value: config.value.music_metadata })
-    })
-    if (!res.ok) {
-      throw new Error()
-    }
-  } catch (e) {
-    if (toastRef.value) {
-      toastRef.value.show('保存 music_metadata 失败')
-    }
-    return
   }
 
   if (toastRef.value) {

@@ -372,8 +372,7 @@ class Manager:
             
             timer_book_ids = data.get('timer_book_ids', [])
             if timer_book_ids:
-                auto_sync = data.get('auto_sync', self.config.auto_sync)
-                self.start_sync_timer(interval_hours=auto_sync)
+                self.start_sync_timer()
                 for book_id in timer_book_ids:
                     book = self.get_book_by_id(book_id)
                     if book:
@@ -497,7 +496,7 @@ class Manager:
         if self._download_manager:
             self._download_manager.wait()
 
-    def start_sync_timer(self, interval_hours: Optional[float] = None) -> None:
+    def start_sync_timer(self) -> None:
         """
         启动定时同步任务
         
@@ -514,11 +513,8 @@ class Manager:
             existing_book_ids = self._sync_timer.get_book_ids()
             self._sync_timer.stop()
         
-        if interval_hours is None:
-            interval_hours = self.config.auto_sync
-        
         self._sync_timer = SyncTimer(
-            interval_hours=interval_hours,
+            config=self.config,
             sync_func=self.sync_and_download,
             logger=self.logger
         )

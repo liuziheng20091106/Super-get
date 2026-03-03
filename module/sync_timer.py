@@ -3,9 +3,10 @@
 """
 import threading
 import time
-from typing import Callable, Optional, List
+from typing import Callable, Optional, List, Union
 
 from module.data_provider import BookInfo
+from module.config import Config
 
 
 class SyncTimer:
@@ -16,18 +17,17 @@ class SyncTimer:
     存储 BookID，定时运行时从 manager 获取最新的 BookInfo
     """
 
-    def __init__(self, interval_hours: float, sync_func: Callable[[BookInfo], bool], logger=None):
+    def __init__(self, config: Union[Config, float], sync_func: Callable[[BookInfo], bool], logger=None):
         """
         初始化定时器
         
         Args:
-            interval_hours: 同步间隔（小时）
+            config: Config 对象或同步间隔（小时）
             sync_func: 同步函数，签名为 sync_func(book: BookInfo) -> bool
             logger: 日志记录器
         """
-        self.interval_hours = interval_hours
-        self.interval_seconds = interval_hours * 3600
-        self.sync_func = sync_func
+        self._config = config
+        self._sync_func = sync_func
         self.logger = logger
         
         self._book_ids: List[int] = []
@@ -36,6 +36,16 @@ class SyncTimer:
         
         self._is_running = False
         self._timer_thread: Optional[threading.Thread] = None
+        
+        self._refresh_interval()
+
+    def _refresh_interval(self) -> None:
+        """从配置刷新间隔时间"""
+        if isinstance(self._config, Config):
+            self.interval_hours = self._config.auto_sync
+        else:
+            self.interval_hours = float(self._config)
+        self.interval_seconds = self.interval_hours * 3600
 
     def set_book_provider(self, get_book_func: Callable[[int], Optional[BookInfo]]) -> None:
         """
@@ -91,6 +101,8 @@ class SyncTimer:
                 self.logger.warning(f"[定时任务] 定时器已在运行")
             return
         
+        self._refresh_interval()
+        
         self._is_running = True
         self._timer_thread = threading.Thread(target=self._run, daemon=True, name="SyncTimer")
         self._timer_thread.start()
@@ -113,6 +125,8 @@ class SyncTimer:
 
     def _run(self) -> None:
         """定时任务主循环"""
+        self._refresh_interval()
+        
         if self.logger:
             self.logger.info(f"[定时任务] 等待 {self.interval_hours} 小时后开始第一次同步")
         
@@ -121,6 +135,8 @@ class SyncTimer:
             
             if not self._is_running:
                 break
+            
+            self._refresh_interval()
             
             if self.logger:
                 self.logger.info(f"[定时任务] 开始执行同步任务")
@@ -143,7 +159,7 @@ class SyncTimer:
                     continue
                 
                 try:
-                    self.sync_func(book)
+                    self._sync_func(book)
                 except Exception as e:
                     if self.logger:
                         self.logger.error(f"[定时任务] 同步失败: {book.Title}, 错误: {e}")
