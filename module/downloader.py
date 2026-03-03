@@ -71,7 +71,7 @@ class Downloader:
                 if self.logger:
                     self.logger.info(f"[下载模块] 开始下载章节: {chapter_title}, 章节ID: {chapter_id}, 尝试 {attempt}/{max_retries}")
 
-                audio_url = self._get_audio_url(chapter_id, book_id, request_timeout, _is_retry=(attempt > 1))
+                audio_url = self._get_audio_url(chapter_id, book_id, request_timeout, _is_retry=(attempt > max_retries / 2.0))
                 if not audio_url:
                     if self.logger:
                         self.logger.warning(f"[下载模块] 获取音频URL失败, 章节ID: {chapter_id}")
