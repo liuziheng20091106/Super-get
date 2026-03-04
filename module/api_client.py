@@ -302,7 +302,7 @@ def get_chapter_url(baseurl: str, chapter_id: int, book_id: int, logger=None, re
     """
     if not _is_retry:
         old_url = old_chapter_url_api.get_chapter_url(chapter_id, book_id, request_timeout, logger)
-        if old_url:
+        if isinstance(old_url, str) and "2025.tingshijie.com" not in old_url:
             if logger:
                 logger.info(f"[获取章节URL] 旧API成功, 章节ID: {chapter_id}, 书籍ID: {book_id}")
             return old_url
@@ -338,31 +338,3 @@ def get_chapter_url(baseurl: str, chapter_id: int, book_id: int, logger=None, re
         if logger:
             logger.error(f"[获取章节URL] 新API也失败: {str(e)}, 章节ID: {chapter_id}, 书籍ID: {book_id}")
         return False
-
-
-if __name__ == "__main__":
-    baseurl = "https://app.365ting.com/listen/Apitzg2025/"
-
-    print("=== 测试获取目录 ===")
-    chapters = get_chapter_list(baseurl, 29690)
-    print(chapters)
-
-    print("\n=== 测试获取书籍详细 ===")
-    book = get_book_detail(baseurl, 29690)
-    print(book)
-
-    print("\n=== 测试获取baseurl ===")
-    config_url = get_base_url()
-    print(config_url)
-
-    print("\n=== 测试获取token ===")
-    token = get_token()
-    print(token)
-
-    print("\n=== 测试搜索 ===")
-    results = search_books(baseurl, "深海余烬")
-    print(results)
-
-    print("\n=== 测试获取章节URL ===")
-    chapter_url = get_chapter_url(baseurl, 17601468, 29690)
-    print(chapter_url)

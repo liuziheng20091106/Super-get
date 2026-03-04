@@ -9,6 +9,6 @@
   "log_level": "DEBUG",
   "auto_sync": 1.1,
   "music_metadata": {
-    "level": 2
+    "level": 1
   }
 }

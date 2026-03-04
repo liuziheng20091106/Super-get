@@ -154,14 +154,10 @@ const saveConfig = async () => {
 
   for (const key of fields) {
     try {
-      let value = config.value[key]
-      if (key === 'music_metadata') {
-        value = JSON.stringify(value)
-      }
       const res = await apiFetch('/api/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key, value })
+        body: JSON.stringify({ key, value: config.value[key] })
       })
       if (!res.ok) {
         throw new Error()
