@@ -1,8 +1,8 @@
 {
-  "version": "1.0.2",
-  "request_interval": 10,
+  "version": "1.0.3",
+  "request_interval": 0.1,
   "request_timeout": 10,
-  "max_retries": 3,
+  "max_retries": 2,
   "max_workers": 2,
   "download_timeout": 60,
   "default_download_dir": "downloads",
@@ -10,5 +10,8 @@
   "auto_sync": 1.1,
   "music_metadata": {
     "level": 1
-  }
+  },
+  "proxy_list": [
+    "https://lite.tkcloud.online/forword.php"
+  ]
 }

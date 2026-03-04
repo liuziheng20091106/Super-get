@@ -73,6 +73,19 @@
         </div>
 
         <div class="card">
+          <h3>代理设置（均衡负载）</h3>
+          <div class="form-group">
+            <label>代理服务器列表（每行一个URL）</label>
+            <textarea 
+              v-model="proxyListText" 
+              rows="5" 
+              placeholder="例如: https://example.com/forward.php"
+            ></textarea>
+            <p class="help-text">用于下载的代理服务器列表，程序会从中选择。可留空。</p>
+          </div>
+        </div>
+
+        <div class="card">
           <h3>日志设置</h3>
           <div class="form-group">
             <label>日志级别(重启生效)</label>
@@ -108,6 +121,7 @@ import { getApiBaseUrl, setApiBaseUrl, apiFetch } from '../utils/api.js'
 const loading = ref(false)
 const toastRef = ref(null)
 const serverAddress = ref('')
+const proxyListText = ref('')
 const config = ref({
   version: '',
   request_interval: 1,
@@ -120,7 +134,8 @@ const config = ref({
   auto_sync: 1.0,
   music_metadata: {
     level: 0
-  }
+  },
+  proxy_list: []
 })
 
 const loadConfig = async () => {
@@ -129,6 +144,9 @@ const loadConfig = async () => {
     const res = await apiFetch('/api/config')
     if (res.ok) {
       config.value = await res.json()
+      if (config.value.proxy_list && Array.isArray(config.value.proxy_list)) {
+        proxyListText.value = config.value.proxy_list.join('\n')
+      }
     }
   } catch (e) {
     if (toastRef.value) {
@@ -149,15 +167,23 @@ const saveConfig = async () => {
     'default_download_dir',
     'log_level',
     'auto_sync',
-    'music_metadata'
+    'music_metadata',
+    'proxy_list'
   ]
 
   for (const key of fields) {
     try {
+      let value = config.value[key]
+      if (key === 'proxy_list') {
+        value = proxyListText.value
+          .split('\n')
+          .map(s => s.trim())
+          .filter(s => s.length > 0)
+      }
       const res = await apiFetch('/api/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key, value: config.value[key] })
+        body: JSON.stringify({ key, value })
       })
       if (!res.ok) {
         throw new Error()
@@ -287,6 +313,22 @@ const saveServerAddress = () => {
 
 .input-with-button .btn-small:hover {
   background: #0056b3;
+}
+
+.form-group textarea {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  font-family: monospace;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.form-group textarea:focus {
+  outline: none;
+  border-color: #4CAF50;
 }
 
 .help-text {

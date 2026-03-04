@@ -7,7 +7,7 @@ import shutil
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 
 
 class Config:
@@ -94,7 +94,8 @@ class Config:
             "auto_sync": 1.0,
             "music_metadata": {
                 "level": 1
-            }
+            },
+            "proxy_list": []
         }
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -194,6 +195,11 @@ class Config:
     def music_metadata_level(self) -> int:
         """音乐元数据写入级别：0-不写入，1-仅文本，2-包含封面"""
         return self.get('music_metadata.level', 1)
+
+    @property
+    def proxy_list(self) -> list:
+        """代理服务器列表（均衡负载）"""
+        return self.get('proxy_list', [])
 
     def to_dict(self) -> Dict[str, Any]:
         """将配置转换为字典，缺失字段使用默认值填充"""

@@ -127,7 +127,13 @@ class Downloader:
         :return: 音频URL，失败返回None
         """
         try:
-            result = get_chapter_url(self.baseurl, chapter_id, book_id, self.logger, request_timeout=request_timeout, _is_retry=_is_retry)
+            proxy_list = self.config.proxy_list if hasattr(self.config, 'proxy_list') else []
+            result = get_chapter_url(
+                self.baseurl, chapter_id, book_id, self.logger, 
+                request_timeout=request_timeout, 
+                _is_retry=_is_retry,
+                proxylist=proxy_list
+            )
             if result and isinstance(result, str):
                 return result
             return None

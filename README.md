@@ -75,6 +75,12 @@ npm run preview
 # 开发
 npm run dev
 ```
+
+## TODO
+
+- [ ] 支持边下边转格式，改倍速，去片头片尾
+
+
 ## 屎山
 
 见 report.html
