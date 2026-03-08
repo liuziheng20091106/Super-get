@@ -221,8 +221,11 @@ class Manager:
         new_chapters = []
         for new_ch in chapter_list:
             if new_ch.chapterid in existing_chapters:
-                existing_ch = existing_chapters[new_ch.chapterid]
-                new_ch.downloaded = existing_ch.downloaded
+                #existing_ch = existing_chapters[new_ch.chapterid]
+                #new_ch.downloaded = existing_ch.downloaded
+                
+                #保留全部内容，避免编辑元数据后丢失
+                new_ch = existing_chapters[new_ch.chapterid]
             new_chapters.append(new_ch)
         
         book.Chapters = new_chapters
@@ -472,8 +475,19 @@ class Manager:
             if self.logger:
                 self.logger.info(f"[下载管理] 暂无未下载章节: {book.Title}")
             return True
-        
+        newbook = self.update_book_detail(book)
+        if isinstance(newbook, BookInfo):
+            if self.logger:
+                self.logger.info(f"[下载管理] 同步书籍信息成功: {book.Title}")
+            
+            book = newbook
+        else:
+            if self.logger:
+                self.logger.error(f"[下载管理] 同步书籍信息失败: {book.Title}")
+            return False
         self.start_download(book)
+        """if self.logger:
+            self.logger.debug(f"[下载管理] 调试断点：当前书籍总章节数: {len(book.Chapters)}")"""
         return True
 
     def pause_download(self) -> None:

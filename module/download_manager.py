@@ -87,14 +87,14 @@ class DownloadManager:
         """
         if chapter.downloaded:
             if self.logger:
-                self.logger.info(f"[下载管理] 章节已下载，跳过: {chapter.title}")
+                self.logger.debug(f"[下载管理] 章节已下载，跳过: {chapter.title}")
             return False
         
         with self._lock:
             existing_ids = set(t.chapter.chapterid for t in self._tasks)
             if chapter.chapterid in existing_ids:
                 if self.logger:
-                    self.logger.info(f"[下载管理] 任务已存在，跳过: {chapter.title}")
+                    self.logger.debug(f"[下载管理] 任务已存在，跳过: {chapter.title}")
                 return False
             
             task = DownloadTask(chapter=chapter, base_url=self.base_url)
@@ -102,7 +102,7 @@ class DownloadManager:
             self._pending_queue.append(task)
         
         if self.logger:
-            self.logger.info(f"[下载管理] 添加任务: {chapter.title}")
+            self.logger.debug(f"[下载管理] 添加任务: {chapter.title}")
         return True
 
     def add_tasks(self, chapters: list[ChapterInfo]) -> int:
