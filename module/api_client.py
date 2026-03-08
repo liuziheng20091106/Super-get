@@ -285,6 +285,75 @@ def search_books(baseurl: str, keyword: str, search_token: str = "abcSEARCH-2025
         return False
 
 
+def _build_chapter_url_params(chapter_id: int, book_id: int) -> Dict[str, Any]:
+    """
+    构建获取章节URL的请求参数
+
+    Args:
+        chapter_id: 章节ID
+        book_id: 书籍ID
+
+    Returns:
+        包含时间戳和签名的参数字典
+    """
+    timestamp = str(int(time.time() * 1000))
+    add_it_parapet = get_add_it_parapet(timestamp)
+
+    return {
+        "timeStamp": timestamp,
+        "chapterId": chapter_id,
+        "addItParapet": add_it_parapet,
+        "bookId": book_id
+    }
+
+
+def _request_chapter_url(baseurl: str, params: Dict[str, Any], logger=None,
+                         request_timeout: int = DEFAULT_TIMEOUT,
+                         proxy_url: Optional[str] = None) -> Optional[str]:
+    """
+    请求章节URL
+
+    Args:
+        baseurl: API基础URL
+        params: 请求参数
+        logger: 日志记录器
+        request_timeout: 请求超时时间（秒）
+        proxy_url: 代理URL（可选）
+
+    Returns:
+        音频URL，失败返回None
+    """
+    try:
+        api_endpoint = f"{baseurl}AppGetChapterUrl2023"
+
+        if proxy_url:
+            request_url = proxy_url
+            params["__base_url_proxy"] = api_endpoint
+            proxy_info = f"代理 {proxy_url}"
+        else:
+            request_url = api_endpoint
+            proxy_info = "直接请求"
+
+        if logger:
+            logger.info(f"[获取章节URL] {proxy_info}, 章节ID: {params['chapterId']}, 书籍ID: {params['bookId']}, URL: {request_url}")
+
+        headers = HEADERS.copy()
+        response = requests.get(request_url, params=params, headers=headers, timeout=request_timeout)
+        response.raise_for_status()
+        data = response.json()
+
+        if data.get("src"):
+            if logger:
+                logger.info(f"[获取章节URL] {proxy_info}成功, 章节ID: {params['chapterId']}")
+            return data["src"]
+        else:
+            raise ValueError(f"不符合要求的结果：{data} 章节ID：{params['chapterId']} 书籍ID：{params['bookId']}")
+    except Exception as e:
+        if logger:
+            logger.error(f"[获取章节URL] 请求失败: {str(e)}, 章节ID: {params.get('chapterId')}, 书籍ID: {params.get('bookId')}")
+        return None
+
+
 def get_chapter_url(baseurl: str, chapter_id: int, book_id: int, logger=None, request_timeout: int = DEFAULT_TIMEOUT, _is_retry: bool = False, proxylist: list[str] = []) -> Union[str, bool]:
     """
     获取章节音频URL
@@ -309,65 +378,17 @@ def get_chapter_url(baseurl: str, chapter_id: int, book_id: int, logger=None, re
             return old_url
         if logger:
             logger.warning(f"[获取章节URL] 旧API失败，尝试新API, 章节ID: {chapter_id}, 书籍ID: {book_id}")
-    
-    try:
-        timestamp = str(int(time.time() * 1000))
-        add_it_parapet = get_add_it_parapet(timestamp)
 
-        url = f"{baseurl}AppGetChapterUrl2023"
-        params = {
-            "timeStamp": timestamp,
-            "chapterId": chapter_id,
-            "addItParapet": add_it_parapet,
-            "bookId": book_id
-        }
-        if logger:
-            logger.info(f"[获取章节URL] 新API请求, 章节ID: {chapter_id}, 书籍ID: {book_id}, URL: {url}")
+    params = _build_chapter_url_params(chapter_id, book_id)
 
-        headers = HEADERS.copy()
-        response = requests.get(url, params=params, headers=headers, timeout=request_timeout)
-        response.raise_for_status()
-        data = response.json()
+    result = _request_chapter_url(baseurl, params, logger, request_timeout)
+    if result:
+        return result
 
-        if data.get("src"):
-            if logger:
-                logger.info(f"[获取章节URL] 新API成功, 章节ID: {chapter_id}")
-            return data["src"]
-        else:
-            raise ValueError(f"不符合要求的结果：{data} 章节ID：{chapter_id} 书籍ID：{book_id}")
-    except Exception as e:
-        if logger:
-            logger.error(f"[获取章节URL] 新API也失败: {str(e)}, 章节ID: {chapter_id}, 书籍ID: {book_id}")
     for proxy in proxylist:
-        timestamp = str(int(time.time() * 1000))
-        add_it_parapet = get_add_it_parapet(timestamp)
+        result = _request_chapter_url(baseurl, params, logger, request_timeout, proxy)
+        if result:
+            return result
 
-        url = f"{baseurl}AppGetChapterUrl2023"
-        params = {
-            "timeStamp": timestamp,
-            "chapterId": chapter_id,
-            "addItParapet": add_it_parapet,
-            "bookId": book_id,
-            "__base_url_proxy": url
-        }
-        if logger:
-            logger.info(f"[获取章节URL] 代理请求{proxy}, 章节ID: {chapter_id}, 书籍ID: {book_id}, URL: {url}")
-
-        if proxy:
-            try:
-                headers = HEADERS.copy()
-                response = requests.get(proxy, params=params, headers=headers, timeout=request_timeout)
-                response.raise_for_status()
-                data = response.json()
-
-                if data.get("src"):
-                    if logger:
-                        logger.info(f"[获取章节URL] 代理请求{proxy}成功, 章节ID: {chapter_id}, 代理: {proxy}")
-                    return data["src"]
-                else:
-                    raise ValueError(f"不符合要求的结果：{data} 章节ID：{chapter_id} 书籍ID：{book_id}")
-            except Exception as e:
-                if logger:
-                    logger.error(f"[获取章节URL] 代理请求{proxy}失败, 章节ID: {chapter_id}, 书籍ID: {book_id}, 代理: {proxy}, 错误: {str(e)}")
     return False
     
